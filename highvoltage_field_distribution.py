@@ -508,10 +508,10 @@ def save_field_contour(conductor_height, label_dict, guard=None):
     label_dict - dictionary containing label coordinates
     '''
     edge_radius = conductor_height * .2
-    # edge0 ++
-    # edge1 -+
-    # edge2 +-
-    # edge3 --
+    # edge0 ++ == upper inner conductor
+    # edge1 -+ == upper outer conductor
+    # edge2 +- == lower inner conductor
+    # edge3 -- == lower outer conductor
     sign = np.array(((1, 1), (-1, 1), (1, -1), (-1, -1)))
     femm.eo_seteditmode('contour')
 
@@ -761,7 +761,7 @@ def calc_field_distribution(transformer_geometry, voltage_high=1,
     # lower D Sets the lower display limit for the density plot.
     femm.eo_showdensityplot(1, 0, 2, 50e6, 0)
 
-    # Plot field lines alont outer point of the PCB conductors
+    # Plot field lines along outer point of the PCB conductors
     save_field_contour(ep_cuivre, etiquettes_dict, guard=guard)
 
     # eo_getconductorproperties("conductor")Properties are returned for the

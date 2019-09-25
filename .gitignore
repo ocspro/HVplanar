@@ -102,3 +102,11 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+# FEMM files
+*.ans
+*.fem
+*.fee
+*.res
+*.csv
+
