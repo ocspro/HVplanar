@@ -470,7 +470,7 @@ def draw_field_contour(coords_start, coords_end, filename=None):
 
     # eo_clearcontour
     # From manual: Clear a prevously defined contour
-#    femm.eo_clearcontour()
+    femm.eo_clearcontour()
 
 
 def skip_last(iterator):
