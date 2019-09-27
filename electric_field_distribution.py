@@ -249,12 +249,12 @@ def draw_guardring(coords, radius, polarity, origin, label_name, label_dict):
 
 def add_guardrings(guards, origin, label_dict):
     ''' Draw circular shape of guard ring in the problem and add a label. The
-    guard rings are automatically added to a circuit/voltage depending on the
-    guard ring coordinates: positive z coordinate gives boundry condition to
-    "high" and negative z coordinate gives boundry of "zero"
-    guards - info on the gaurd ring
+    guard ring polarity is automatically added to a circuit/voltage depending
+    on the     guard ring coordinates: positive z coordinate gives boundry
+    condition to "high" and negative z coordinate gives boundry of "zero"
+    guards - geometry of the guard ring (dr, dz, radius, polarity)
     origin - origin of the guard ring relative to the corner of the PCB closest
-    to the dielectric
+    to the dielectric.
     label_dict - name of the label dictionary
     '''
     for idx, g in enumerate(guards):
@@ -262,7 +262,7 @@ def add_guardrings(guards, origin, label_dict):
             draw_guardring(g[:2], g[2], g[3], origin, 'guard' + str(idx),
                            label_dict)
         else:
-            draw_guardring(guards[:2], guards[2], guards[3], origin, 'guard1',
+            draw_guardring(guards[:2], guards[2], guards[3], origin, 'guard0',
                            label_dict)
             break
 

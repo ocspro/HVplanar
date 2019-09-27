@@ -73,6 +73,7 @@ def run_FEMM_field_distribution(geometry, voltage=1, guard=None):
     'guard' - the circular guard ring is defined as follows:
     (x coordinate, y coordinate, radius)
     '''
+    geometry.check_variables()
     filedir = os.getcwd()
     C = tf_field.calc_field_distribution(geometry, voltage, guard, filedir)
     files = [filedir + '\\output_field_edge' + str(idx) + '.csv' for idx
