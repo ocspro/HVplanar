@@ -30,6 +30,7 @@ Created on Wed Dec 05 15:30:49 2018
 """
 
 import femm
+from math import pi
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -112,6 +113,7 @@ def initial_setup(limite_externe, voltage_high):
     femm.ei_addmaterial('Teflon', 2.1, 2.1, 0)
     femm.ei_addmaterial('Silgel', 2.7, 2.7, 0)
     femm.ei_addmaterial('Midel', 3.15, 3.15, 0)
+    femm.ei_addmaterial('Epoxy', 10, 10, 0)
 
     # Conditions limites
     # ei makeABC(n,R,x,y,bc)
@@ -191,82 +193,6 @@ def set_conductor_label(coords, label_name, label_dict):
     return label_dict
 
 
-def draw_guardring(coords, radius, polarity, origin, label_name, label_dict):
-    ''' Draw circular shape of guard ring in the problem
-    coords - gives the coordinates of the center of the conductor
-    radius- radius of the conductor from the coordinates defiend by coords
-    polarity - attach the gaurd ring to high side or low side. Positive
-    polarity sets the guard ring to the upper side of the dielectric and adds
-    it ot the "high" conductor
-    origin - origin of the guard ring relative to the corner of the PCB closest
-    to the dielectric
-    label_name - name of this conductor that is stored in the label dictionary
-    label_dict - dictionary that stores label coordinates
-    '''
-    # high or low side?
-    if polarity > 0:
-        origin = (origin[0][2], origin[0][1])
-        point1 = (origin[0] + radius + coords[0],
-                  origin[1] + coords[1])
-        point2 = (point1[0], point1[1] + 2 * radius)
-        in_conductor = 'high'
-    else:
-        origin = (origin[1][2], origin[1][1])
-        point1 = (origin[0] + radius + coords[0],
-                  origin[1] + coords[1])
-        point2 = (point1[0], point1[1] - 2 * radius)
-        in_conductor = 'zero'
-
-    # ei_drawarc(x1,y1,x2,y2,angle,maxseg)
-    # From manual: Adds nodes at (x1,y1) and (x2,y2) and adds an arc of the
-    # specified angle and discretization connecting the nodes.
-    femm.ei_drawarc(point1[0], point1[1], point2[0], point2[1], 180, 1)
-    femm.ei_addarc(point2[0], point2[1], point1[0], point1[1], 180, 1)
-
-    # Add label and block property to guard ring
-    label_coord = (point1[0], np.average((point1[1], point2[1])))
-    femm.ei_addblocklabel(*label_coord)
-    femm.ei_selectlabel(*label_coord)
-    femm.ei_setblockprop('<No Mesh>', 1, 0, 'guards')
-    femm.ei_clearselected()
-    label_dict[label_name] = label_coord
-
-    # Set boundry based on coordinates
-    # ei_setarcsegmentprop(maxsegdeg, ’propname’, hide, group, ’inconductor’)
-    # From manual: Set the selected arc segments to:
-    # Meshed with elements that span at most maxsegdeg degrees per element
-    # Boundary property ’propname’
-    # hide: 0 = not hidden in post-processor, 1 == hidden in post processor
-    # A member of group number group
-    # A member of the conductor specified by the string ’inconductor’. If the
-    # segment is not part of a conductor, this parameter can be specified
-    # as ’<None>’.
-    femm.ei_selectarcsegment(label_coord[0] - radius, label_coord[1])
-    femm.ei_selectarcsegment(label_coord[0] + radius, label_coord[1])
-    femm.ei_setarcsegmentprop(.5, '<None>', 0, 0, in_conductor)
-    femm.ei_clearselected()
-
-
-def add_guardrings(guards, origin, label_dict):
-    ''' Draw circular shape of guard ring in the problem and add a label. The
-    guard ring polarity is automatically added to a circuit/voltage depending
-    on the     guard ring coordinates: positive z coordinate gives boundry
-    condition to "high" and negative z coordinate gives boundry of "zero"
-    guards - geometry of the guard ring (dr, dz, radius, polarity)
-    origin - origin of the guard ring relative to the corner of the PCB closest
-    to the dielectric.
-    label_dict - name of the label dictionary
-    '''
-    for idx, g in enumerate(guards):
-        if isinstance(g, (list, tuple)):
-            draw_guardring(g[:2], g[2], g[3], origin, 'guard' + str(idx),
-                           label_dict)
-        else:
-            draw_guardring(guards[:2], guards[2], guards[3], origin, 'guard0',
-                           label_dict)
-            break
-
-
 def draw_conductor(coords, in_conductor, label_name, label_dict):
     ''' Draw rectabngualr shapeof conducture in problem and add label '''
     femm.ei_drawrectangle(*coords)
@@ -324,39 +250,33 @@ def round_conductor_edges(geometry, label_dict):
     # Define parameters of the rounding
     turns = geometry[0]
     conductor_height = geometry[7]
-    condctor_width = geometry[8]
+    conductor_width = geometry[8]
     corner_radius = .2 * conductor_height  # percentage of conductor height
+    segment_length = 0.004
 
-    # ei_createradius(x,y,r)
-    # From manual: turns a corner located at (x,y) into a curve of radius r.
-
-    # Round primary side corners and add new labels for the new points
-    inner_corner = (np.array(label_dict['prim0']) +
-                    np.array((-condctor_width/2., -conductor_height/2.)))
-    femm.ei_createradius(inner_corner[0], inner_corner[1], corner_radius)
-    femm.ei_selectarcsegment(*inner_corner)
-    femm.ei_setarcsegmentprop(.5, '<None>', 0, 0, 'high')
-    label_dict['edge0'] = inner_corner
-    outer_corner = (np.array(label_dict['prim' + str(turns - 1)]) +
-                    np.array((condctor_width/2., -conductor_height/2.)))
-    femm.ei_createradius(outer_corner[0], outer_corner[1], corner_radius)
-    femm.ei_selectarcsegment(*outer_corner)
-    femm.ei_setarcsegmentprop(.5, '<None>', 0, 0, 'high')
-    label_dict['edge1'] = outer_corner
-
-    # Round secondary side corners and add new labels for the new points
-    inner_corner = (np.array(label_dict['sec0']) +
-                    np.array((-condctor_width/2., conductor_height/2.)))
-    femm.ei_createradius(inner_corner[0], inner_corner[1], corner_radius)
-    femm.ei_selectarcsegment(*inner_corner)
-    femm.ei_setarcsegmentprop(.5, '<None>', 0, 0, 'zero')
-    label_dict['edge2'] = inner_corner
-    outer_corner = (np.array(label_dict['sec' + str(turns - 1)]) +
-                    np.array((condctor_width/2., conductor_height/2.)))
-    femm.ei_createradius(outer_corner[0], outer_corner[1], corner_radius)
-    femm.ei_selectarcsegment(*outer_corner)
-    femm.ei_setarcsegmentprop(.5, '<None>', 0, 0, 'zero')
-    label_dict['edge3'] = outer_corner
+    # Find primary side corners and add new labels for the rounded edge
+    label_dict['edge0'] = (np.array(label_dict['prim0']) +
+                           np.array((-conductor_width, -conductor_height))/2.0)
+    label_dict['edge1'] = (np.array(label_dict['prim' + str(turns - 1)]) +
+                           np.array((conductor_width, -conductor_height))/2.0)
+    # Find secondary side corners and add new labels for the rounded edge
+    label_dict['edge2'] = (np.array(label_dict['sec0']) +
+                           np.array((-conductor_width, conductor_height))/2.0)
+    label_dict['edge3'] = (np.array(label_dict['sec' + str(turns - 1)]) +
+                           np.array((conductor_width, conductor_height))/2.0)
+    # Round edges and set arcsegment properties
+    for e in ['edge0', 'edge1']:
+        corner = label_dict[e]
+        femm.ei_createradius(corner[0], corner[1], corner_radius)
+        femm.ei_selectarcsegment(*corner)
+        femm.ei_setarcsegmentprop(1, '<None>', 0, 0, 'high')
+    for e in ['edge2', 'edge3']:
+        corner = label_dict[e]
+        femm.ei_createradius(corner[0], corner[1], corner_radius)
+        femm.ei_selectarcsegment(*corner)
+        femm.ei_setarcsegmentprop(1, '<None>', 0, 0, 'zero')
+    increase_pcb_mesh(conductor_height, conductor_height*2, segment_length,
+                      label_dict)
 
 
 def trapezoidal_conductor_edges(geometry, label_dict):
@@ -369,37 +289,293 @@ def trapezoidal_conductor_edges(geometry, label_dict):
     # Define parameters of the rounding
     turns = geometry[0]
     conductor_height = geometry[7]
-    condctor_width = geometry[8]
+    conductor_width = geometry[8]
     cut_in_length = 2 * conductor_height  # percentage of conductor height
+    corner_radius = 1.7 * conductor_height
+    ledge_height = 0.005
+    ledge_radius = 0.004
+    segment_length = 0.004
+    angle_max = 1
 
-    # ei_movetranslate(dx,dy)
-    # From manual: dx,dy – distance by which the selected objects are shifted.
+    # Make trapezaoidal corners on primary side corners and add new labels for
+    # the new points. Sequence: -> find corner to be moved -> set segment props
+    # -> make ledge -> move corner to make trapezoid -> add nodes for edge and
+    # edge corner -> repeat for all corners -> set all segment props -> round
+    # all edges -> set all arcsegment props -> set segment props along pcb for
+    # all trapezoidal conductor edges.
 
-    # Round primary side corners and add new labels for the new points
+    # Primary inner corner
     inner_corner = (np.array(label_dict['prim0']) +
-                    np.array((-condctor_width/2., -conductor_height/2.)))
+                    np.array((-conductor_width/2., -conductor_height/2.)))
+    femm.ei_selectsegment(*(inner_corner + np.array((0, conductor_height/2.))))
+    femm.ei_setsegmentprop('<None>', segment_length, 0, 0, 0, 'high')
+    label_dict['ledge0corner'] = (inner_corner +
+                                  np.array((0, conductor_height-ledge_height)))
+    femm.ei_addnode(*label_dict['ledge0corner'])
     femm.ei_selectnode(*inner_corner)
     femm.ei_movetranslate(cut_in_length, 0)
-    label_dict['edge0'] = inner_corner + np.array((cut_in_length, 0))
+    label_dict['edge0'] = (np.array(label_dict['prim0']) +
+                           np.array(((-conductor_width+cut_in_length)/2., 0)))
+    label_dict['edge0corner'] = inner_corner + np.array((cut_in_length, 0))
+    # Primary outer corner
     outer_corner = (np.array(label_dict['prim' + str(turns - 1)]) +
-                    np.array((condctor_width/2., -conductor_height/2.)))
+                    np.array((conductor_width/2., -conductor_height/2.)))
+    femm.ei_selectsegment(*(outer_corner + np.array((0, conductor_height/2.))))
+    femm.ei_setsegmentprop('<None>', segment_length, 0, 0, 0, 'high')
+    label_dict['ledge1corner'] = (outer_corner +
+                                  np.array((0, conductor_height-ledge_height)))
+    femm.ei_addnode(*label_dict['ledge1corner'])
     femm.ei_selectnode(*outer_corner)
     femm.ei_movetranslate(-cut_in_length, 0)
-    label_dict['edge1'] = outer_corner + np.array((-cut_in_length, 0))
+    label_dict['edge1'] = (np.array(label_dict['prim' + str(turns - 1)]) +
+                           np.array(((conductor_width-cut_in_length)/2., 0)))
+    label_dict['edge1corner'] = outer_corner + np.array((-cut_in_length, 0))
 
-    # Round secondary side corners and add new labels for the new points
+    # Secondary inner corner
     inner_corner = (np.array(label_dict['sec0']) +
-                    np.array((-condctor_width/2., conductor_height/2.)))
+                    np.array((-conductor_width/2., conductor_height/2.)))
+    femm.ei_selectsegment(*(inner_corner +
+                            np.array((0, -conductor_height/2.))))
+    femm.ei_setsegmentprop('<None>', segment_length, 0, 0, 0, 'zero')
+    label_dict['ledge2corner'] = (inner_corner +
+                                  np.array((0, ledge_height-conductor_height)))
+    femm.ei_addnode(*label_dict['ledge2corner'])
     femm.ei_selectnode(*inner_corner)
     femm.ei_movetranslate(cut_in_length, 0)
-    label_dict['edge2'] = inner_corner + np.array((cut_in_length, 0))
+    label_dict['edge2'] = (np.array(label_dict['sec0']) +
+                           np.array(((-conductor_width+cut_in_length)/2., 0)))
+    label_dict['edge2corner'] = inner_corner + np.array((cut_in_length, 0))
+    # Secondary outer corner
     outer_corner = (np.array(label_dict['sec' + str(turns - 1)]) +
-                    np.array((condctor_width/2., conductor_height/2.)))
+                    np.array((conductor_width/2., conductor_height/2.)))
+    femm.ei_selectsegment(*(outer_corner +
+                            np.array((0, -conductor_height/2.))))
+    femm.ei_setsegmentprop('<None>', segment_length, 0, 0, 0, 'zero')
+    label_dict['ledge3corner'] = (outer_corner +
+                                  np.array((0, ledge_height-conductor_height)))
+    femm.ei_addnode(*label_dict['ledge3corner'])
     femm.ei_selectnode(*outer_corner)
     femm.ei_movetranslate(-cut_in_length, 0)
-    label_dict['edge3'] = outer_corner + np.array((-cut_in_length, 0))
+    label_dict['edge3'] = (np.array(label_dict['sec' + str(turns - 1)]) +
+                           np.array(((conductor_width-cut_in_length)/2., 0)))
+    label_dict['edge3corner'] = outer_corner + np.array((-cut_in_length, 0))
 
-    # TODO make segments around edges to decrease mesh sizing
+    # Set segment size for diagonal line to decrease mesh sizing
+    femm.ei_selectsegment(*label_dict['edge0'])
+    femm.ei_selectsegment(*label_dict['edge1'])
+    femm.ei_setsegmentprop('<None>', segment_length, 0, 0, 0, 'high')
+    femm.ei_clearselected()
+    femm.ei_selectsegment(*label_dict['edge2'])
+    femm.ei_selectsegment(*label_dict['edge3'])
+    femm.ei_setsegmentprop('<None>', segment_length, 0, 0, 0, 'zero')
+    femm.ei_clearselected()
+
+    # Round new edge on primary and secondary and set arcangle
+    for idx in range(4):
+        node = label_dict['edge' + str(idx) + 'corner']
+        femm.ei_createradius(node[0], node[1], corner_radius)
+        node = label_dict['ledge' + str(idx) + 'corner']
+        femm.ei_createradius(node[0], node[1], ledge_radius)
+    # Set arcsegment properties
+    segments = [str(x) + str(y) + 'corner' for x in ['edge', 'ledge']
+                for y in range(2)]
+    for s in segments:
+        femm.ei_selectarcsegment(*label_dict[s])
+    femm.ei_setarcsegmentprop(angle_max, '<None>', 0, 0, 'high')
+    femm.ei_clearselected()
+
+    segments = [str(x) + str(y) + 'corner' for x in ['edge', 'ledge']
+                for y in range(2, 4)]
+    for s in segments:
+        femm.ei_selectarcsegment(*label_dict[s])
+    femm.ei_setarcsegmentprop(angle_max, '<None>', 0, 0, 'zero')
+    femm.ei_clearselected()
+
+    # Set segment size to decrease mesh size along edge of PCB where the field
+    # is high
+    increase_pcb_mesh(cut_in_length, conductor_height, segment_length,
+                      label_dict)
+
+
+def increase_pcb_mesh(cut_in, dz, segment_length, label_dict):
+    ''' Set segment size to decrease mesh size along edge of PCB where the
+    field is high'''
+    pcb_segment = []
+    pcb_node = []
+    pcb_node.append((np.array(label_dict['edge0']) +
+                    np.array((-cut_in*1.5, dz/2.))))
+    pcb_segment.append(pcb_node[-1] + np.array((cut_in/2., 0)))
+    pcb_node.append((np.array(label_dict['edge1']) +
+                    np.array((cut_in*1.5, dz/2.))))
+    pcb_segment.append(pcb_node[-1] + np.array((-cut_in/2., 0)))
+    pcb_node.append((np.array(label_dict['edge2']) +
+                    np.array((-cut_in*1.5, -dz/2.))))
+    pcb_segment.append(pcb_node[-1] + np.array((cut_in/2., 0)))
+    pcb_node.append((np.array(label_dict['edge3']) +
+                    np.array((cut_in*1.5, -dz/2.))))
+    pcb_segment.append(pcb_node[-1] + np.array((-cut_in/2., 0)))
+
+    for idx, node in enumerate(pcb_node):
+        femm.ei_addnode(*node)
+        label_dict['edge' + str(idx) + 'pcb'] = node
+
+    for segment in pcb_segment:
+        femm.ei_selectsegment(*segment)
+    femm.ei_setsegmentprop('<None>', segment_length, 0, 0, 0, '<None>')
+    femm.ei_clearselected()
+
+
+def add_guard(geometry, guard, label_dict):
+    ''' Add guard ring(s) in the problem and add a label.
+    geometry - geometry list of the transformer
+    guard - Guard object
+    label_dict - name of the label dictionary
+    '''
+    if isinstance(guard, (list, tuple)):
+        for idx, g in enumerate(guard):
+            if g.gtype == 'Ring':
+                draw_guard_ring(g.distance, g.gap, g.radius, g.polarity,
+                                'guard' + str(idx), label_dict)
+            elif g.gtype == 'Trench':
+                draw_guard_trench(geometry, g, 'trench' + str(idx), label_dict)
+    else:
+        if guard.gtype == 'Ring':
+                draw_guard_ring(guard.distance, guard.gap, guard.radius,
+                                guard.polarity, 'guard0', label_dict)
+        elif guard.gtype == 'Trench':
+            draw_guard_trench(geometry, guard, 'trench0', label_dict)
+
+
+def draw_guard_ring(distance, gap, radius, polarity, label_name, label_dict):
+    ''' Draw circular shape of guard ring in the problem and add a label.
+    distance - distance in r-plane from edge of PCB to edge of guard ring
+    gap - distance in z-plane from edge of PCB to edge of guard ring
+    radius- radius of the guard ring conductor
+    polarity - attach the gaurd ring to high side or low side. Positive
+    polarity sets the guard ring to the upper side of the dielectric and adds
+    it ot the "high" conductor
+    label_name - name of this conductor that is stored in the label dictionary
+    label_dict - dictionary that stores label coordinates
+    '''
+    max_angle = 1
+    # high or low side?
+    if polarity > 0:
+        origin = label_dict['PCB_prim']
+        origin = np.array((origin[2], origin[1]))
+        point1 = origin + np.array((radius + distance, gap))
+        point2 = point1 + np.array((0, 2 * radius))
+        in_conductor = 'high'
+    else:
+        origin = label_dict['PCB_sec']
+        origin = np.array((origin[2], origin[1]))
+        point1 = origin + np.array((radius + distance, -gap))
+        point2 = point1 + np.array((0, -2 * radius))
+        in_conductor = 'zero'
+    label_dict[label_name + 'surface'] = point1
+
+    # ei_drawarc(x1,y1,x2,y2,angle,maxseg)
+    # From manual: Adds nodes at (x1,y1) and (x2,y2) and adds an arc of the
+    # specified angle and discretization connecting the nodes.
+    femm.ei_drawarc(point1[0], point1[1], point2[0], point2[1], 180, max_angle)
+    femm.ei_addarc(point2[0], point2[1], point1[0], point1[1], 180, max_angle)
+
+    # Add label and block property to guard ring
+    label_coord = np.average((point1, point2), axis=0)
+    femm.ei_addblocklabel(*label_coord)
+    femm.ei_selectlabel(*label_coord)
+    femm.ei_setblockprop('<No Mesh>', 1, 0, 'guards')
+    femm.ei_clearselected()
+    label_dict[label_name] = label_coord
+
+    # Set boundry based on coordinates
+    # ei_setarcsegmentprop(maxsegdeg, ’propname’, hide, group, ’inconductor’)
+    # From manual: Set the selected arc segments to:
+    # Meshed with elements that span at most maxsegdeg degrees per element
+    # Boundary property ’propname’
+    # hide: 0 = not hidden in post-processor, 1 == hidden in post processor
+    # A member of group number group
+    # A member of the conductor specified by the string ’inconductor’. If the
+    # segment is not part of a conductor, this parameter can be specified
+    # as ’<None>’.
+    femm.ei_selectarcsegment(label_coord[0] - radius, label_coord[1])
+    femm.ei_selectarcsegment(label_coord[0] + radius, label_coord[1])
+    femm.ei_setarcsegmentprop(max_angle, 'None', 0, 'None', in_conductor)
+    femm.ei_clearselected()
+
+
+def draw_guard_trench(geometry, trench, label_name, label_dict):
+    '''
+    Draw a trench on the outside of turn closest to the dielectric. The trench
+    is defined by the GuardTrench class. The trench is drawn on the upper side
+    if polarity is higher than 0. Else, it is drawn on the bottom.
+    '''
+    conductor_height = geometry[7]
+    conductor_width = geometry[8]
+    max_angle = 2
+    elementsize = 0.05
+    if trench.inner:
+        sign = -1
+        turns = 1
+    else:
+        sign = 1
+        turns = geometry[0]
+
+    # find starting point
+    if trench.polarity:
+        node0 = (np.array(label_dict['prim' + str(turns - 1)]) +
+                 np.array((conductor_width*sign, conductor_height))/2.0 +
+                 np.array((trench.distance * sign, 0)))
+        in_conductor = 'high'
+        pm = 1  # polarity multiplier
+    else:
+        node0 = (np.array(label_dict['sec' + str(turns - 1)]) +
+                 np.array((conductor_width*sign, -conductor_height))/2.0 +
+                 np.array((trench.distance * sign, 0)))
+        in_conductor = 'zero'
+        pm = -1  # polarity multiplier
+    # draw four/five points and lines between points 1 to last to 0
+    nodes = [(0, 0), (trench.width*sign, 0),
+             (trench.width*sign, trench.depth * pm), (0, trench.depth * pm)]
+    if trench.drill_angle > 90:
+        alpha = (1.0 - trench.drill_angle/180.) * pi
+        depth_added = trench.width / (2.0 * np.tan(alpha))
+        nodes.insert(-1, (trench.width/2.0*sign,
+                          (trench.depth + depth_added) * pm))
+    nodes = [node0 + np.array(n) for n in nodes]
+    for idx, n in enumerate(nodes):
+        femm.ei_addnode(*n)
+        label_dict[label_name + 'node'+str(idx)] = n
+    ind = range(1, len(nodes)) + [0, ]
+    segment_gen = (np.concatenate((nodes[ind[idx]], nodes[ind[idx+1]]))
+                   for idx in range(len(nodes)-1))
+    for n in segment_gen:
+        femm.ei_addsegment(*n)
+        femm.ei_selectsegment(*(np.mean((n[:2], n[2:]), axis=0)))
+    femm.ei_setsegmentprop('None', elementsize, 0, 0, 'None', in_conductor)
+    femm.ei_clearselected()
+    # remove existing segment of the PCB
+    femm.ei_selectsegment(*(np.mean((nodes[0:2]), axis=0)))
+    femm.ei_deleteselectedsegments()
+    # draw circular top
+    if (pm == 1 and sign == 1) or (pm == -1 and sign == -1):
+        femm.ei_addarc(nodes[0][0], nodes[0][1], nodes[1][0], nodes[1][1],
+                       trench.outer_angle, max_angle)
+    else:
+        femm.ei_addarc(nodes[1][0], nodes[1][1], nodes[0][0], nodes[0][1],
+                       trench.outer_angle, max_angle)
+
+    # set conductor properties on the boundries
+    femm.ei_selectarcsegment(*(np.mean((nodes[0:2]), axis=0)))
+    femm.ei_setarcsegmentprop(max_angle, 'None', 0, 'None', in_conductor)
+
+    # add label and set material
+    label_dict[label_name] = (nodes[0] +
+                              np.array((trench.width/2.*sign,
+                                        trench.depth*pm/2.)))
+    femm.ei_addblocklabel(*label_dict[label_name])
+    femm.ei_selectlabel(*label_dict[label_name])
+    femm.ei_setblockprop(trench.material, 1, 0, 'None')
+    femm.ei_clearselected()
 
 
 def get_height_between_layers(no_layers, initial_value, d_height):
@@ -546,8 +722,59 @@ def plot_field_contour(filename):
     return f
 
 
-def calc_field_distribution(transformer_geometry, voltage_high=1,
-                            guard=None, filedir=None):
+def set_view(view, guard, label_dict):
+    for v, l in get_zoom_coords_corners(view, label_dict):
+        femm.eo_zoom(*v)
+        if view.filename:
+            femm.eo_savebitmap(view.filedir + view.filename + l + '.bmp')
+    if guard:
+        for v, l in get_zoom_coords_guard(view, guard, label_dict):
+            femm.eo_zoom(*v)
+            if view.filename:
+                femm.eo_savebitmap(view.filedir + view.filename + l + '.bmp')
+    else:
+        # end the view on upper side outer corner if there is no guard,
+        # as this is usually the most critical part of the design
+        femm.eo_zoom(*get_zoom_coords_corners(view, label_dict)[1][0])
+
+
+def get_zoom_coords_corners(view, label_dict):
+    span = np.array((view.span_r, view.span_z)) / 2.0
+    zoom_coords = []
+    labels = []
+    for label in ['edge'+str(idx) for idx in range(4)]:
+        center_point = np.array(label_dict[label])
+        labels.append(label)
+        zoom_coords.append(np.concatenate((center_point - span,
+                                           center_point + span)))
+    return zip(zoom_coords, labels)
+
+
+def get_zoom_coords_guard(view, guard, label_dict):
+    zoom_coords = []
+    labels = []
+    if not isinstance(guard, (list, tuple)):
+        guard = [guard, ]
+    for idx, g in enumerate(guard):
+        span = np.array((view.span_r, view.span_z))
+        if g.gtype == 'Ring':
+            label = 'guard{}surface'
+            if (span < np.array((2*g.radius, g.radius))).all():
+                span = np.array((2*g.radius, g.radius)) / 2.0
+        elif g.gtype == 'Trench':
+            label = 'trench{}'
+            if (span < 2 * np.array((g.width, g.depth))).all():
+                span = np.array((g.width, g.width*9./16.))
+        else:
+            span = span / 2.0
+        labels.append(label.format(idx))
+        center_point = np.array(label_dict[label.format(idx)])
+        zoom_coords.append(np.concatenate((center_point - span,
+                                           center_point + span)))
+    return zip(zoom_coords, labels)
+
+
+def calc_field_distribution(transformer_geometry, voltage_high=1, view=None):
 
     # Initiation de parametres
     geometry = translate_geometry(transformer_geometry)
@@ -636,13 +863,16 @@ def calc_field_distribution(transformer_geometry, voltage_high=1,
     femm.ei_drawrectangle(*coords_gel_dielectrique)
     femm.ei_drawrectangle(*coords_pcb_prim)
     femm.ei_drawrectangle(*coords_pcb_sec)
+    etiquettes_dict['PCB_prim'] = coords_pcb_prim
+    etiquettes_dict['PCB_sec'] = coords_pcb_sec
 
-    round_conductor_edges(geometry, etiquettes_dict)
-#    trapezoidal_conductor_edges(geometry, etiquettes_dict)
+    if transformer_geometry.edge_type == 'Round':
+        round_conductor_edges(geometry, etiquettes_dict)
+    elif transformer_geometry.edge_type == 'Trapezoidal':
+        trapezoidal_conductor_edges(geometry, etiquettes_dict)
 
-    if guard:
-        origins = (coords_pcb_prim, coords_pcb_sec)
-        add_guardrings(guard, origins, etiquettes_dict)
+    if transformer_geometry.guard:
+        add_guard(geometry, transformer_geometry.guard, etiquettes_dict)
 
     # mi zoomnatural()
     # From manual: zooms to a “natural” view with sensible extents.
@@ -732,7 +962,7 @@ def calc_field_distribution(transformer_geometry, voltage_high=1,
             femm.ei_clearselected()
 
     # Enregistrement
-    femm.ei_saveas('capacitance_transfo.fee')
+    femm.ei_saveas('field_calculations.fee')
 
     # Maillage
     # From manual: Note that it is not necessary to run mesh before performing
@@ -759,21 +989,26 @@ def calc_field_distribution(transformer_geometry, voltage_high=1,
     # the magnitude of D, and 2 plots the magnitude of E
     # upper D Sets the upper display limit for the density plot.
     # lower D Sets the lower display limit for the density plot.
-    femm.eo_showdensityplot(1, 0, 2, 50e6, 0)
+    femm.eo_showdensityplot(1, 0, 2, 50e6 * 20. / 19., 0)
 
-    # Plot field lines along outer point of the PCB conductors
-    save_field_contour(ep_cuivre, etiquettes_dict, guard=guard)
+    # Save field lines along outer point of the PCB conductors. If the
+    # conductors have trapezoidal shape, it is difficult to estimate where the
+    # peak field will be. Hence, the contour lines are not saved.
+#    if not edge_trapezoid:
+#        save_field_contour(ep_cuivre, etiquettes_dict, guard=guard)
+    if view:
+        set_view(view, transformer_geometry.guard, etiquettes_dict)
 
     # eo_getconductorproperties("conductor")Properties are returned for the
     # conductor property named ”conductor”. Two values are returned: The
     # voltage of the specified conductor, and the charge carried on the
     # specified conductor.
 
-    # Calculer la capacité
-    circuit_properties = femm.eo_getconductorproperties('high')
-    capacitance = circuit_properties[1]
+    # Calculate the capacitance
+    circuit_properties = femm.eo_getconductorproperties('zero')
+    charge = -circuit_properties[1]
 
-    # Commandes liés au logiciel pour fermer correctement le FEMM
+    # Commands for closing FEMM windows
     # femm.eo_close()
     # femm.ei_close()
-    return capacitance
+    return charge
