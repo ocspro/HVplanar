@@ -1,79 +1,137 @@
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
+"""Module for calculating inducances, resistances and coupling capacitance of
+a planar transformer consisting of PCB printed windigns on both sides. Uses the
+program FEMM (www.femm.info) to perform finite element calculations. This
+module is just simplifying the building of the geometry in FEMM.
 """
-Created on Thu Sep 26 11:26:33 2019
 
-@author: olechrs
-"""
 from copy import deepcopy
+
 import transformer_inductance as tf_ind
-import coupling_capacitance as tf_cap
 import electric_field_distribution as tf_field
 
 
-def run_FEMM_inductance(geometry, currents, inductances):
+def _run_FEMM_inductance(geometry, currents, inductances, **kwargs):
+    '''Launch FEMM to calculate inductance and resistance parameters of a
+    planar transformer at 6.78 MHz operating frequency.
+
+    Args:
+        geometry (:obj:'TransformerGeometry'): geometry of the planar
+        transformer.
+        currents (:obj:'list' of int): specification of primary and secondary
+        side currents in the form [I_prim, I_sec].
+        inductances (:obj:'list' of int): specification of non-zero primary
+        and secondary side inductances if calculating mutual inductance
+        [L_prim, L_sec].
+
+    Returns:
+        inductance (int): calculated inductance value
+        resistance (int): calculated resistance value
     '''
-    Launch FEMM to calculate inductance and resistance parameters of a planar
-    transformer at 6.78 MHz operating frequency.
-    'geometry' - TransformerGeometry object
-    'currents' - specification of primary and secondary side currents [i1, i2]
-    'inductances' - specification of nono-zero primary and secondary side
-    inductances if calculating mutual inductance [L1, L2]
-    '''
+
     geometry.check_variables()
-    (L, R) = tf_ind.calc_inductance(geometry, currents, inductances)
-    return L, R
+    (inductance, resistance) = tf_ind.calc_inductance(geometry, currents,
+                                                      inductances, **kwargs)
+    return inductance, resistance
 
 
-def run_FEMM_inductance_prim(geometry):
-    ''' Calculate the primary side inductance and resistance '''
-    L_prim, R_prim = run_FEMM_inductance(geometry, currents=[1, 0],
-                                         inductances=[0, 0])
+def run_FEMM_inductance_prim(geometry, **kwargs):
+    '''Calculate the primary side inductance and resistance.
+
+    Args:
+        geometry (:obj:'TransformerGeometry'): geometry of the planar
+        transformer.
+
+    Returns:
+        L_prim (int): calculated self-inductance value of primary side
+        R_prim (int): calculated eqv. series resistance of primary side
+    '''
+
+    L_prim, R_prim = _run_FEMM_inductance(geometry, currents=[1, 0],
+                                          inductances=[0, 0], **kwargs)
     return L_prim, R_prim
 
 
-def run_FEMM_inductance_sec(geometry):
-    ''' Calculate the secndary side inductance and resistance '''
-    L_sec, R_sec = run_FEMM_inductance(geometry, currents=[0, 1],
-                                       inductances=[0, 0])
+def run_FEMM_inductance_sec(geometry, **kwargs):
+    '''Calculate the secndary side inductance and resistance.
+
+    Args:
+        geometry (:obj:'TransformerGeometry'): geometry of the planar
+        transformer.
+
+    Returns:
+        L_sec (int): calculated self-inductance value of secondary side
+        R_sec (int): calculated eqv. series resistance of secondary side
+    '''
+
+    L_sec, R_sec = _run_FEMM_inductance(geometry, currents=[0, 1],
+                                        inductances=[0, 0], **kwargs)
     return L_sec, R_sec
 
 
-def run_FEMM_inductance_mutual(geometry):
-    ''' Calculate mutual inductance of the transformer at 6.78 MHz operating
-    frequency.. First, the primary and secondary self inductances are
-    calculated, and the mutual inductance is then found. '''
-    L_prim, R_prim = run_FEMM_inductance_prim(geometry)
-    L_sec, R_sec = run_FEMM_inductance_sec(geometry)
-    L_mutual, __ = run_FEMM_inductance(geometry, currents=[1, 1],
-                                       inductances=[L_prim, L_sec])
+def run_FEMM_inductance_mutual(geometry, **kwargs):
+    '''.Calculate mutual inductance of the transformer.
+
+    Args:
+        geometry (:obj:'TransformerGeometry'): geometry of the planar
+        transformer.
+
+    Returns:
+        L_prim (int): calculated self-inductance value of primary side
+        R_prim (int): calculated eqv. series resistance of primary side
+        L_sec (int): calculated self-inductance value of secondary side
+        R_sec (int): calculated eqv. series resistance of secondary side
+        L_mutual (int): calculated  mutual inductance of transformer
+    '''
+
+    L_prim, R_prim = run_FEMM_inductance_prim(geometry, **kwargs)
+    L_sec, R_sec = run_FEMM_inductance_sec(geometry, **kwargs)
+    L_mutual, __ = _run_FEMM_inductance(geometry, currents=[1, 1],
+                                        inductances=[L_prim, L_sec], **kwargs)
     return [L_prim, R_prim, L_sec, R_sec, L_mutual]
 
 
-def run_FEMM_capacitance(geometry):
+def run_FEMM_capacitance(geometry, **kwargs):
+    '''Calculate the coupling capacitance between the primary and secondary
+    windings of the planar transformer.
+
+    Args:
+        geometry (:obj:'TransformerGeometry'): geometry of the planar
+        transformer.
+
+    Returns:
+        capacitance (int): calculated coupling capacitance of transformer.
     '''
-    Calculate the coupling capacitance between the primary and secondary
-    windings of a planar transformer with geometry of type
-    TransformerGeometry
-    'geometry' - TransformerGeometry object
-    '''
+
     geometry.check_variables()
-    C = tf_cap.calc_coupling_capacitance(geometry)
-    return C
+    capacitance = tf_field.calc_field_distribution(geometry, **kwargs)
+    return capacitance
 
 
-def run_FEMM_field_distribution(geometry, voltage=1, view=None):
+def run_FEMM_field_distribution(geometry, voltage=1, view=None, **kwargs):
     '''
-    Calculate the field distribution between the primary and secondary
-    windings of a planar transformer with geometry of type
-    TransformerGeometry
-    'geometry' - TransformerGeometry object
-    'voltage' - the voltage value of the positive electrode. The negative
-    electrode is set to 0. Default value is 1 volt
-    'view' - View object
+    Calculate the coupling capacitance and investigate the electric field
+    distribution between the primary and secondary windings of a planar
+    transformer.
+
+    Args:
+        geometry (:obj:'TransformerGeometry'): geometry of the planar
+        transformer.
+        voltage (int): the voltage value of the positive electrode. The
+        negative electrode is set to 0.
+        view (:obj:'list' of :obj:'View'): View object
+
+    Returns:
+        capacitance (int): calculated coupling capacitance of transformer.
     '''
+
     geometry.check_variables()
-    C = tf_field.calc_field_distribution(geometry, voltage, view)
-    return C
+    capacitance = tf_field.calc_field_distribution(geometry,
+                                                   voltage,
+                                                   view,
+                                                   **kwargs)
+    return capacitance
 
 
 class TransformerGeometry(object):
@@ -85,7 +143,7 @@ class TransformerGeometry(object):
                  height_pcb_prepreg=0, height_dielectric=1,
                  height_copper=0.035, height_gap=0.01, height_gel=5,
                  radius_pcb=None, radius_gel=None, radius_dielectric=None,
-                 material_dielectric='fr4', edge_type='Round', guard=None):
+                 material_dielectric='fr4', tracks=None, guard=None):
         self.turns_primary = turns_primary
         self.layers_primary = layers_primary
         self.turns_secondary = turns_secondary
@@ -103,18 +161,16 @@ class TransformerGeometry(object):
         self.radius_dielectric = radius_dielectric
         self.radius_gel = radius_gel
         self.material_dielectric = material_dielectric
-        self.edge_type = edge_type
+        # self.edge_type = edge_type
+        self.tracks = tracks
         self.guard = guard
 
     def check_variables(self):
-        '''
-        Check and append changes to the class variables to be consistent
-        with the expected format of the methods that use the
-        TransformerGeometry class
-        '''
-        if type(self.width_between_tracks) not in [list, tuple]:
+        '''Check and append changes to the class variables to be consistent
+        with the expected format of the methods that use this class.'''
+        if not isinstance(self.width_between_tracks, (list, tuple)):
             self.width_between_tracks = [self.width_between_tracks, ] * 2
-        if type(self.radius_inner_track) not in [list, tuple]:
+        if not isinstance(self.radius_inner_track, (list, tuple)):
             self.radius_inner_track = [self.radius_inner_track, ] * 2
         if self.radius_pcb is None:
             self.radius_pcb = (max(self.turns_primary, self.turns_secondary) *
@@ -127,7 +183,48 @@ class TransformerGeometry(object):
             self.radius_gel = self.radius_dielectric + 2
 
 
+class FancyTrack(object):
+    '''Additional manipulation of individual tracks in the winding
+    structure.'''
+    def __init__(self, layer, track, side_h, side_v='high', rounding='single',
+                 elongation=None):
+        self.layer = layer
+        self.track = track
+        self.side_h = side_h
+        self.side_v = side_v
+        self.rounding = rounding
+        self.elongation = elongation
+
+    def __str__(self):
+        return ('FancyTrack on {} side, layer {}, track {} with {} rounding.'
+                .format(self.side_v, self.layer, self.track, self.rounding))
+
+    def __deepcopy__(self, memo):  # memo is a dict of id's to copies
+        id_self = id(self)         # memoization avoids unnecesary recursion
+        _copy = memo.get(id_self)
+        if _copy is None:
+            _copy = type(self)(
+                deepcopy(self.layer, memo),
+                deepcopy(self.track, memo),
+                deepcopy(self.side_h, memo),
+                deepcopy(self.side_v, memo),
+                deepcopy(self.rounding, memo),
+                deepcopy(self.elongation, memo))
+            memo[id_self] = _copy
+        return _copy
+
+    def mirror(self):
+        'Returns a new object with the opposite side than self.'''
+        _copy = deepcopy(self)
+        if _copy.side_h == 'high':
+            _copy.side_h == 'low'
+        else:
+            _copy.side_h = 'high'
+        return _copy
+
+
 class Guard(object):
+    ''' Base class for field guards with different cross section geometry.'''
     def __init__(self, gtype, polarity):
         self.gtype = gtype
         self.polarity = polarity  # 0 for low, >0 for high
@@ -149,17 +246,18 @@ class Guard(object):
         return _copy
 
     def mirror(self):
+        '''Returns a new guard object with the opposite polarity than self.'''
         _copy = deepcopy(self)
         _copy.polarity = int(not _copy.polarity)
         return _copy
 
     def pair(self):
+        '''Returns a list containing self and a mirrored guard.'''
         return [self, self.mirror()]
 
 
 class GuardRing(Guard):
-    ''' Parameters for the guard ring structure with a circular cross
-    section. '''
+    ''' Guard structure with a circular cross section.'''
     def __init__(self, radius, distance, gap, polarity=1):
         Guard.__init__(self, 'Ring', polarity)
         self.radius = radius
@@ -180,10 +278,10 @@ class GuardRing(Guard):
 
 
 class GuardTrench(Guard):
-    ''' Parameters for the guard trench structure. Common values for
-    drill_angle is 90(flat) and 118 (135 in some cases). '''
+    '''Guard structure with a squarish cross section. Common values for
+    drill_angle is 90(flat) and 118 (135 in some cases).'''
     def __init__(self, depth, width, distance, polarity=1, outer_angle=10,
-                 drill_angle=90, material='Epoxy', inner=False):
+                 drill_angle=90, material='epoxy', inner=False):
         Guard.__init__(self, 'Trench', polarity)
         self.depth = depth
         self.width = width

@@ -1,71 +1,18 @@
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""
-Created on Wed Dec 05 15:30:49 2018
 
-@author: olechrs
-
-###########################################################################
-# Simulation FEMM lancé par Matlab. Il faut spécifier la géometrie
-# des spires (16 valeur) du transformateur où le primaire et le secondaire
-# sont fabriqués comme des circuits imprimés, geoemtrie[16].
-#
-#
-#        Matrices: index 1 pour le primaire (en haut),
-#                    index 2 pour le secondaire (en bas)
-#
-#        |                    l_cuivre        l_cuivre
-#        |                   <----> l_entre <---->
-#        |<--r_interieur(1)-> ____ <-------> ____        no_sp_prim == 2
-#        |___________________|____|_________|____|_____
-# y=0___|_____________________________________________| ep_pcb
-#        |                           |    |  /\
-#        |                            |____|  \/ep_cuivre
-#        |<-----r_interieur(2)------>                no_sp_sec == 1
-#        |
-#        |<---------------r_pcb------------------------>
-#        |
-# l'axe de symétrie
-
- Geometry array
- 1 no_spires_prim =      nombre de spires au primaire
- 2 no_couches_prim =     nombre de couche au primaire
- 3 no_spires_sec =       nombre de spires au secondaire
- 4 no_couches_sec =      nombre de couche au secondaire
- 5 ep_pcb_noyau =        epaisseur noyau du circuit imprimé cuivre non-inclu
-                         [mm]
- 6 ep_pcb_prepreg =      epaisseur couches isolantes additionelles du circuit
-                         imprimé [mm]
- 7 ep_dielectric =       epaisseur de la couche isolante principale [mm]
- 8 ep_cuivre =           epaisseur cuivre [mm]
- 9 l_cuivre =            largeur de fil en cuivre [mm]
-10 r_interieur =         radii entre l'axe et le premier tour [mm]
-11 l_entre =             largeur entre chaque tour [mm]
-12 r_pcb =               radii de pcb [mm]
-13 r_dielectrique =      radii du disc isolant [mm]
-14 materiel_dielectrique =  materiel_dielectrique entre le primaire et le
-                         secondaire du transformateur. 'FR4', 'polyesterimide'
-                         et 'teflon' sont acceptés
-15 ep_gap =              gap entre le cuivre sur le PCB et l'isolant [mm]
-16 ep_gel =              epaisseur du gel à chaque coté de l'isolant [mm]
-17 r_gel =              radii du gel supérieure au disc isolant [mm]
-###########################################################################
-"""
+from numpy import average
 
 import femm
-import numpy as np
 
 
-def initial_setup(limite_externe, courants):
-    # Commandes liés au logiciel pour acceder toutes les commandes FEMM
-    # Les commandes prochaines sont lancé par le fichier principal de
-    # l'algorithme génétique pour eviter des éxecuter plusieurs fois. En plus,
-    # le fichier openfemm.m est modifié pour éviter que la fenêtre FEMM
-    # travaille à l'arrière-plan: le drapeu '-windowhide' est ajouté à la
-    # commande au système.
-    femm.openfemm()
-    # mi_minimize()
-    # From manual: minimizes the active magnetics input view.
-    #femm.main_minimize()
+def initial_setup(boundary, currents, **kwargs):
+    '''Start femm and setup problem definition and set boundary condition.'''
+    if kwargs.get('hide') is True:
+        femm.openfemm(1)
+        femm.main_minimize()
+    else:
+        femm.openfemm()
 
     # newdocument(doctype)
     # From manual: Creates a new preprocessor document and opens up a new
@@ -87,44 +34,32 @@ def initial_setup(limite_externe, courants):
     # direction for 2-D planar problems, can also be specified for planar
     # problems. A sixth parameter represents the minimum angle constraint sent
     # to the mesh generator.
-    frequence = 6.78e6                # frequence de coupure
-    precision = 5e-9                    # precision du calcul de la simulation
-    femm.mi_probdef(frequence, 'millimeters', 'axi', precision, 50, 30)
+    if 'frequency' in kwargs:
+        freq = kwargs['frequency']
+    else:
+        freq = 6.78e6
+    if 'precision' in kwargs:
+        precision = kwargs['precision']
+    else:
+        precision = 5e-9
+    if 'min_angle' in kwargs:
+        min_angle = kwargs['min_angle']
+    else:
+        min_angle = 30
+    femm.mi_probdef(freq, 'millimeters', 'axi', precision, 50, min_angle)
 
-    # Circuit
+    # Circuit parameters
     # mi addcircprop("circuitname", i, circuittype)
     # From manual: adds a new circuit property with name "circuitname" with a
     # prescribed current, i. The circuittype parameter is 0 for a
     # parallel-connected circuit and 1 for a series-connected circuit.
 
-    # Les courants donnés sont pour le primaire et le secondaire
-    I1, I2 = courants
-
+    # The currents in the primary and secondary circuits are set
+    I1, I2 = currents
     femm.mi_addcircprop('phase_prim', I1, 1)
     femm.mi_addcircprop('phase_sec', I2, 1)
 
-    # Trace de la geometrie
-    # mi_drawrectangle(x1, y1, x2, y2)
-    # From manual: no discription
-
-    # ei selectsegment(x,y)
-    # From manual: Select the line segment closest to (x,y)
-
-    # mi_setsegmentprop("propname",
-    #                   elementsize, automesh, hide, group, "inconductor",)
-    # From manual: Set the select segments to have:
-    # Boundary property "propname"
-    # Local element size along segment no greater than elementsize
-    # automesh: 0 = mesher defers to the element constraint defined by
-    # elementsize, 1 = mesher automatically chooses mesh size along the
-    # selected segments
-    # hide: 0 = not hidden in post-processor, 1 == hidden in post processor
-    # A member of group number group
-    # A member of the conductor specified by the string "inconductor". If the
-    # segment is not part of a conductor, this parameter can be specified as
-    # "<None>".
-
-    # Materiaux
+    # Add materials properties used in the simulation
     # mi addmaterial("materialname", mu x, mu y, H c, J, Cduct, Lam d,
     # Phi hmax, lam fill, LamType, Phi hx, Phi hy,NStrands,WireD)
     # From manual: adds a newmaterial with called "materialname" with the
@@ -154,13 +89,16 @@ def initial_setup(limite_externe, courants):
     # Square wire.
     # – WireD Diameter of each wire constituent strand in millimeters.
     femm.mi_addmaterial('air', 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-    femm.mi_addmaterial('FR4', 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-    femm.mi_addmaterial('cuivre', 1, 1, 0, 0, 58, 0, 0, 0, 0, 0, 0)
-    femm.mi_addmaterial('Polysterimide', 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-    femm.mi_addmaterial('Teflon', 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-    femm.mi_addmaterial('Silgel', 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+    femm.mi_addmaterial('fr4', 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+    femm.mi_addmaterial('copper', 1, 1, 0, 0, 58, 0, 0, 0, 0, 0, 0)
+    femm.mi_addmaterial('polysterimide', 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+    femm.mi_addmaterial('teflon', 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+    femm.mi_addmaterial('silgel', 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+    if 'material' in kwargs:
+        for m in kwargs['material']:
+            femm.mi_addmaterial(*m)
 
-    # Conditions limites
+    # Boundary condition
     # ei makeABC(n,R,x,y,bc)
     # From manual: creates a series of circular shells that emulate the
     # impedance of an unbounded domain (i.e. an Improvised Asymptotic Boundary
@@ -170,235 +108,164 @@ def initial_setup(limite_externe, courants):
     # be specified as 0 for a Dirichlet outer edge or 1 for a Neumann outer
     # edge. If the function is called without all the parameters, the function
     # makes up reasonable values for the missing parameters.
-    femm.mi_makeABC(7, limite_externe, 0, 0, 0)
-
-
-def translate_geometry(g):
-    ''' Translates from old to new style of handling geometry parameters'''
-    geometry = []
-    geometry.append(g.turns_primary)
-    geometry.append(g.layers_primary)
-    geometry.append(g.turns_secondary)
-    geometry.append(g.layers_secondary)
-    geometry.append(g.height_pcb_core)
-    geometry.append(g.height_pcb_prepreg)
-    geometry.append(g.height_dielectric)
-    geometry.append(g.height_copper)
-    geometry.append(g.width_copper)
-    geometry.append(g.radius_inner_track)
-    geometry.append(g.width_between_tracks)
-    geometry.append(g.radius_pcb)
-    geometry.append(g.radius_dielectric)
-    if g.material_dielectric == 'fr4':
-        geometry.append(1)
-    elif g.material_dielectric == 'polysterimide':
-        geometry.append(2)
-    elif g.material_dielectric == 'teflon':
-        geometry.append(3)
-    else:
-        geometry.append(-1)
-    geometry.append(g.height_gap)
-    geometry.append(g.height_gel)
-    geometry.append(g.radius_gel)
-
-    return geometry
+    femm.mi_makeABC(7, boundary, 0, 0, 0)
 
 
 def coords_of_rectangle(x0, y0, dx, dy):
-    '''
-    Return array with the coordinates of the two opposite corners of a
-    rectangle. Useful as femm commands don't accept arrays as input.
-    '''
+    ''' Return array with the coordinates of the two opposite corners of a
+    rectangle.'''
     return (x0, y0, x0+dx, y0+dy)
 
 
-def get_height_between_layers(no_layers, initial_value, d_height):
-    '''
-    return an array with the height between copper layers in the PCB depending
-    on the number of layers and geometry parameters
-    '''
-    if no_layers == 1:
-        height = (initial_value,)
-    elif no_layers == 2:
-        height = (initial_value, initial_value + d_height)
-    elif no_layers == 4:
-        height = np.cumsum([initial_value]+list(d_height)).tolist()
+def get_z_coord_copper_layer(g):
+    ''' Calculate z coordinate of copper layers depending on the number of
+    copper layers in each pcb.'''
+    z_coord_first_layer = (g.height_dielectric + g.height_gap, -g.height_gap)
+    z_coords = []
+    if g.layers_primary == 2:
+        z_coords.append((z_coord_first_layer[0],
+                         z_coord_first_layer[0] + g.height_copper +
+                         g.height_pcb_core))
+    elif g.layers_primary == 4:
+        z_coords.append((z_coord_first_layer[0],
+                         z_coord_first_layer[0] + g.height_copper +
+                         g.height_pcb_prepreg,
+                         z_coord_first_layer[0] + g.height_copper * 2 +
+                         g.height_pcb_prepreg + g.height_pcb_core,
+                         z_coord_first_layer[0] + g.height_copper * 3 +
+                         g.height_pcb_prepreg * 2 + g.height_pcb_core))
     else:
-        print ('get_height_between_layers(): invalid number of layers')
-    return height
+        z_coords.append((z_coord_first_layer[0],))
 
+    if g.layers_secondary == 2:
+        z_coords.append((z_coord_first_layer[1],
+                         z_coord_first_layer[1] - g.height_copper -
+                         g.height_pcb_core))
+    elif g.layers_secondary == 4:
+        z_coords.append((z_coord_first_layer[1],
+                         z_coord_first_layer[1] - g.height_copper -
+                         g.height_pcb_prepreg,
+                         z_coord_first_layer[1] - g.height_copper * 2 -
+                         g.height_pcb_prepreg - g.height_pcb_core,
+                         z_coord_first_layer[1] - g.height_copper * 3 -
+                         g.height_pcb_prepreg * 2 - g.height_pcb_core))
+    else:
+        z_coords.append((z_coord_first_layer[1],))
 
-def set_conductor_label(coords, in_conductor, label_name, label_dict):
-    '''
-    set a block label inside a square conductor, and give the block label
-    properties. INPUT: corner, length and height of conductor, label name and
-    label dictionary
-    '''
-    # mi_addblocklabel(x,y)
-    # From manual: Add a new block label at (x,y)
-    label_coord = (np.average((coords[0], coords[2])), np.average((coords[1],
-                                                                   coords[3])))
-    femm.mi_addblocklabel(*label_coord)
-    femm.mi_selectlabel(*label_coord)
-    if in_conductor == 1:
-        femm.mi_setblockprop('cuivre', 1,  0, 'phase_prim', 0, 1, 1)
-    elif in_conductor == 0:
-        femm.mi_setblockprop('cuivre', 1,  0, 'phase_sec', 0, 1, 1)
-    femm.mi_clearselected()
-    label_dict[label_name] = label_coord
-    return label_dict
+    return z_coords
 
 
 def draw_conductor(coords, in_conductor, label_name, label_dict):
-    ''' '''
+    '''Draw a square conductor, set a block label in the middle of the
+    conductor and add label properties.'''
     femm.mi_drawrectangle(*coords)
-    # ajouter la tension pour les trace du bobinage du primaire
-    # label du bobinage du primaire
-    label_dict = set_conductor_label(coords,
-                                     in_conductor,
-                                     label_name,
-                                     label_dict)
-    return label_dict
+
+    label_coord = (average((coords[0], coords[2])),
+                   average((coords[1], coords[3])))
+    femm.mi_addblocklabel(*label_coord)
+    femm.mi_selectlabel(*label_coord)
+    if in_conductor == 1:
+        femm.mi_setblockprop('copper', 1,  0, 'phase_prim', 0, 1, 1)
+    elif in_conductor == 0:
+        femm.mi_setblockprop('copper', 1,  0, 'phase_sec', 0, 1, 1)
+    femm.mi_clearselected()
+    label_dict[label_name] = label_coord
 
 
-def add_conductors(geometry, z0, dz, label_dict):
-    '''  Add conductors on a pcb layer to the problem '''
-    no_spires_prim = geometry[0]
-    no_couches_prim = geometry[1]
-    no_spires_sec = geometry[2]
-    no_couches_sec = geometry[3]
-    ep_cuivre = geometry[7]
-    l_cuivre = geometry[8]
-    r_interieur = geometry[9]
-    l_entre = geometry[10]
+def add_conductors(g, label_dict):
+    '''Add all conductors of primary and secondary side pcbs
 
-    ep_couches = get_height_between_layers(no_couches_prim, z0[0], dz)
-    for c in range(no_couches_prim):
-        for i in range(no_spires_prim):
-            # coordiantes of conductor
-            coords_conductor = coords_of_rectangle(r_interieur[0] +
-                                                   (l_entre[0] + l_cuivre) * i,
-                                                   ep_couches[c], l_cuivre,
-                                                   ep_cuivre)
-            # desiner la conductrice, ajouter la tension  et le label
-            label_dict = draw_conductor(coords_conductor, 1,
-                                        'prim' + str(i + c * no_spires_prim),
-                                        label_dict)
-    # définition du bobinage du secondaire
-    ep_couches = get_height_between_layers(no_couches_prim, z0[1], -dz)
-    for c in range(no_couches_sec):
-        for i in range(no_spires_sec):
-            coords_conductor = coords_of_rectangle(r_interieur[1] +
-                                                   (l_entre[1] + l_cuivre) * i,
-                                                   ep_couches[c], l_cuivre,
-                                                   -ep_cuivre)
-            # desiner la conductrice, ajouter la tension  et le label
-            label_dict = draw_conductor(coords_conductor, 0,
-                                        'sec' + str(i + c * no_spires_sec),
-                                        label_dict)
+    Args:
+        g (:obj:'TransformerGeometry'): g contains all geometry information
+        needed to build conductors in the problem.
+    '''
+
+    z_copper = get_z_coord_copper_layer(g)
+    # adding conductors on the primary side
+    for c in range(g.layers_primary):
+        for i in range(g.turns_primary):
+            coords_conductor = coords_of_rectangle(g.radius_inner_track[0] +
+                                                   (g.width_between_tracks[0] +
+                                                    g.width_copper) * i,
+                                                   z_copper[0][c],
+                                                   g.width_copper,
+                                                   g.height_copper)
+            draw_conductor(coords_conductor,
+                           1,
+                           'prim' + str(i + c * g.turns_primary),
+                           label_dict)
+    # adding conductors on the secondary side
+    for c in range(g.layers_secondary):
+        for i in range(g.turns_secondary):
+            coords_conductor = coords_of_rectangle(g.radius_inner_track[1] +
+                                                   (g.width_between_tracks[1] +
+                                                    g.width_copper) * i,
+                                                   z_copper[1][c],
+                                                   g.width_copper,
+                                                   -g.height_copper)
+            draw_conductor(coords_conductor,
+                           0,
+                           'sec' + str(i + c * g.turns_secondary),
+                           label_dict)
 
 
-def calc_inductance(transformer_geometry, courants, inductances=(None, None)):
-
-    # Initiation de parametres
-    # Si les courants sont plus grand que zero et les inductances du primaire
-    # et du secondaire sont données, on calcul l'inductance mutuel.
-    L1, L2 = inductances
-    L, R = [0, 0]
-    geometry = translate_geometry(transformer_geometry)
-
-    # Grandeurs de la géometrie
-#    no_spires_prim = geometry[0]
-    no_couches_prim = geometry[1]
-#    no_spires_sec = geometry[2]
-#    no_couches_sec = geometry[3]
-    ep_pcb_noyau = geometry[4]
-    ep_pcb_prepreg = geometry[5]
-    ep_dielectric = geometry[6]
-    ep_cuivre = geometry[7]
-#    l_cuivre = geometry[8]
-#    r_interieur = geometry[9]
-#    l_entre = geometry[10]
-    r_pcb = geometry[11]
-    r_dielectrique = geometry[12]
-    materiel_dielectrique = geometry[13]
-    ep_gap = geometry[14]
-    ep_gel = geometry[15]
-    r_gel = geometry[16]
-
-    # condition aux limits, limit externe de la simulation
-    limits_externes = 2 * r_dielectrique
-
-    # dictionnaire pour gérer les etiquette de la géometrie
-    etiquettes_dict = {}
-
-    # initialitiation de la problème
-    initial_setup(limits_externes, courants)
-
-    # définition de l'dielectrique
-    coords_disc_dielectrique = coords_of_rectangle(0, 0, r_dielectrique,
-                                                   ep_dielectric)
-    # définition du gel dielectrique
-    coords_gel_dielectrique = coords_of_rectangle(0, -ep_gel, r_gel,
-                                                  2*ep_gel+ep_dielectric)
-    # définition du PCB
-    coords_pcb_prim = 0
-    coords_pcb_sec = 0
-    z0 = (ep_dielectric + ep_gap, -ep_gap)
-
-    # dessiner le bobinage
-    if no_couches_prim == 1:
-        # print('une couche par PCB')
-        # définition du bobinage
-        dz = 0
-        add_conductors(geometry, z0, dz, etiquettes_dict)
-        # définition du PCB au primaire
-        coords_pcb_prim = coords_of_rectangle(0, ep_dielectric + ep_cuivre +
-                                              ep_gap, r_pcb, ep_pcb_noyau)
-        # définition du PCB au secondaire
-        coords_pcb_sec = coords_of_rectangle(0, -ep_cuivre - ep_gap, r_pcb,
-                                             -ep_pcb_noyau)
-
-    elif no_couches_prim == 2:
-        # print('deux couches par PCB')
-        # définition du bobinage
-        dz = ep_cuivre + ep_pcb_noyau
-        add_conductors(geometry, z0, dz, etiquettes_dict)
-        # définition du PCB au primaire
-        coords_pcb_prim = coords_of_rectangle(0, ep_dielectric + ep_cuivre +
-                                              ep_gap, r_pcb, ep_pcb_noyau)
-        # définition du PCB au secondaire
-        coords_pcb_sec = coords_of_rectangle(0, -ep_cuivre - ep_gap, r_pcb,
-                                             -ep_pcb_noyau)
-
-    elif no_couches_prim == 4:
-        # print('quatre couches par PCB')
-        # définition du bobinage
-        dz = np.array((ep_cuivre + ep_pcb_prepreg, ep_cuivre + ep_pcb_noyau,
-                       ep_cuivre + ep_pcb_prepreg))
-        add_conductors(geometry, z0, dz, etiquettes_dict)
-        # définition du isolant au primaire
-        coords_pcb_prim = coords_of_rectangle(0, ep_dielectric + ep_cuivre +
-                                              ep_gap, r_pcb, ep_pcb_noyau +
-                                              2*ep_pcb_prepreg + 3*ep_cuivre)
-        # définition du isolant au secondaire
-        coords_pcb_sec = coords_of_rectangle(0, -ep_cuivre - ep_gap, r_pcb,
-                                             -ep_pcb_noyau - 2*ep_pcb_prepreg -
-                                             3*ep_cuivre)
+def add_pcbs(tg):
+    '''Add primary and secondary side pcbs.'''
+    # coordinates of the PCB on the primary side
+    if tg.layers_primary == 1 or tg.layers_primary == 2:
+        coords_pcb_prim = coords_of_rectangle(0,
+                                              tg.height_dielectric +
+                                              tg.height_copper + tg.height_gap,
+                                              tg.radius_pcb,
+                                              tg.height_pcb_core)
+    elif tg.layers_primary == 4:
+        coords_pcb_prim = coords_of_rectangle(0,
+                                              tg.height_dielectric +
+                                              tg.height_copper + tg.height_gap,
+                                              tg.radius_pcb,
+                                              tg.height_pcb_core +
+                                              2 * tg.height_pcb_prepreg +
+                                              2 * tg.height_copper)
     else:
-        'paramètre de couche inconnu'
-        return 0
+        print('Unknown number of layers on primary side')
+        femm.closefemm()
+        return (0, 0)
 
-    femm.mi_drawrectangle(*coords_disc_dielectrique)
-    femm.mi_drawrectangle(*coords_gel_dielectrique)
+    # coordinates of the PCB on the secondary side
+    if tg.layers_secondary == 1 or tg.layers_secondary == 2:
+        coords_pcb_sec = coords_of_rectangle(0,
+                                             -tg.height_copper - tg.height_gap,
+                                             tg.radius_pcb,
+                                             -tg.height_pcb_core)
+    elif tg.layers_secondary == 4:
+        coords_pcb_sec = coords_of_rectangle(0,
+                                             -tg.height_copper - tg.height_gap,
+                                             tg.radius_pcb,
+                                             -tg.height_pcb_core -
+                                             2 * tg.height_pcb_prepreg -
+                                             2 * tg.height_copper)
+    else:
+        print('Unknown number of layers on secondary side')
+        femm.closefemm()
+        return (0, 0)
     femm.mi_drawrectangle(*coords_pcb_prim)
     femm.mi_drawrectangle(*coords_pcb_sec)
 
-    # mi zoomnatural()
-    # From manual: zooms to a “natural” view with sensible extents.
-    femm.mi_zoomnatural
 
-    # Ajoute de block labels, étiquettes dans les surfaces
+def add_isolation(tg):
+    # coordinates of isolation disc
+    coords_isolation = coords_of_rectangle(0, 0, tg.radius_dielectric,
+                                           tg.height_dielectric)
+    # coordinates of gel or liquid surrounding the transformer
+    coords_gel = coords_of_rectangle(0, -tg.height_gel, tg.radius_gel,
+                                     2 * tg.height_gel + tg.height_dielectric)
+    femm.mi_drawrectangle(*coords_isolation)
+    femm.mi_drawrectangle(*coords_gel)
+
+
+def add_block_labels(tg, etiquettes_dict):
+    '''Add block labels to pcbs, air, isolation disc, isolation gel/liquid.'''
+    # Add block labels
     # ei seteditmode(editmode)
     # From manual: Sets the current editmode to:
     # – "nodes" - nodes
@@ -411,31 +278,31 @@ def calc_inductance(transformer_geometry, courants, inductances=(None, None)):
     # ei addblocklabel(x,y)
     # From manual: Add a new block label at (x,y)
 
-    # label pour le PCB
-    coords = [2, ep_dielectric + ep_pcb_noyau / 2.]
+    # labels for the PCBs
+    coords = [2, tg.height_dielectric + tg.height_pcb_core / 2.]
     femm.mi_addblocklabel(*coords)
     etiquettes_dict['pcb_prim'] = coords
 
-    coords = [2, - ep_pcb_noyau / 2.]
+    coords = [2, - tg.height_pcb_core / 2.]
     femm.mi_addblocklabel(*coords)
     etiquettes_dict['pcb_sec'] = coords
 
-    # label pour l'air autour
-    coords = [2, ep_dielectric * 2 + ep_gel]
+    # label for the surrounding air
+    coords = [2, tg.height_dielectric * 2 + tg.height_gel]
     femm.mi_addblocklabel(*coords)
     etiquettes_dict['air'] = coords
 
-    # label pour le gel autour
-    coords = [r_pcb + 2, ep_dielectric + ep_gel / 2.]
+    # label for the dilectric gel or liquid surrounding the transformer
+    coords = [tg.radius_pcb + 2, tg.height_dielectric + tg.height_gel / 2.]
     femm.mi_addblocklabel(*coords)
     etiquettes_dict['gel'] = coords
 
-    # label pour l'isolant
-    coords = [2, ep_dielectric / 2.]
+    # label for the isolation disc
+    coords = [2, tg.height_dielectric / 2.]
     femm.mi_addblocklabel(*coords)
     etiquettes_dict['isolant'] = coords
 
-    # Associer blocks avec materiaux
+    # Set material type for all blocks
     # mi_setblockprop("blockname", automesh, meshsize, "incircuit",
     # magdirection, group, turns)
     # From manual: Set the selected block labels to have the properties:
@@ -457,7 +324,7 @@ def calc_inductance(transformer_geometry, courants, inductances=(None, None)):
 
     femm.mi_selectlabel(*etiquettes_dict['pcb_prim'])
     femm.mi_selectlabel(*etiquettes_dict['pcb_sec'])
-    femm.mi_setblockprop('FR4', 1, 0, '<None>', 0, 1, 0)
+    femm.mi_setblockprop('fr4', 1, 0, '<None>', 0, 1, 0)
     femm.mi_clearselected()
 
     femm.mi_selectlabel(*etiquettes_dict['air'])
@@ -465,27 +332,56 @@ def calc_inductance(transformer_geometry, courants, inductances=(None, None)):
     femm.mi_clearselected()
 
     femm.mi_selectlabel(*etiquettes_dict['gel'])
-    femm.mi_setblockprop('Silgel', 1, 0, 'None')
+    femm.mi_setblockprop('silgel', 1, 0, 'None')
     femm.mi_clearselected()
 
     femm.mi_selectlabel(*etiquettes_dict['isolant'])
-    if materiel_dielectrique == 1:
-        femm.mi_setblockprop('FR4', 1, 0, 'None')
-    elif materiel_dielectrique == 2:
-        femm.mi_setblockprop('Polysterimide', 1, 0, 'None')
-    elif materiel_dielectrique == 3:
-        femm.mi_setblockprop('Teflon', 1, 0, 'None')
+    femm.mi_setblockprop(tg.material_dielectric, 1, 0, 'None')
     femm.mi_clearselected()
 
-    # Enregistrement
-    femm.mi_saveas('inductance_transfo.fem')
 
-    # Maillage
+def calc_inductance(tg, currents, inductances=(None, None), **kwargs):
+    ''' Setup of magneto-static problem in femm to calculate inductance and
+    resistance of planar transformer.
+
+    Args:
+        tg (:obj:'TransformerGeometry'): tg contains all geometry information
+        of the transformer.
+        currents (list of float): currents in the primary and secondary side
+        circuits on the form [I_prim, I_sec].
+        inductances (list of float): self-inductances of the primary and
+        secondary side circuits on the form [L_prim, L_sec]. Used to calculate
+        mutual inductance.
+
+    Returns:
+        (inductance, resistance): calculated self or mutual inductance and
+        equivalent series resistance of either primary or secondary circuit.
+    '''
+
+    etiquettes_dict = {}  # Dictionary to store coordinates of nodes
+
+    # initialitiation of the magneto-static problem
+    boundary_radius = 2 * tg.radius_dielectric
+    initial_setup(boundary_radius, currents, **kwargs)
+
+    # draw geometry and add block labels
+    add_conductors(tg, etiquettes_dict)
+    add_pcbs(tg)
+    add_isolation(tg)
+    add_block_labels(tg, etiquettes_dict)
+
+    # mi zoomnatural()
+    # From manual: zooms to a “natural” view with sensible extents.
+    femm.mi_zoomnatural()
+
+    # Saving geometry file
+    femm.mi_saveas('inductance_transformer.fem')
+
+    # Meshing and analysis
     # From manual: Note that it is not necessary to run mesh before performing
     # an analysis, as mi_analyze() will make sure the mesh is up to date before
     # running an analysis.
 
-    # Resolution
     # mi analyze(flag)
     # From manual: runs fkern to solve the problem. The flag parameter controls
     # whether the fkern window is visible or minimized. For a visible window,
@@ -493,7 +389,7 @@ def calc_inductance(transformer_geometry, courants, inductances=(None, None)):
     # flag should be set to 1.
     femm.mi_analyze(1)
 
-    # Post-processeur
+    # Post-processing
     femm.mi_loadsolution()
 
     # mo_seteditmode(mode)
@@ -531,48 +427,27 @@ def calc_inductance(transformer_geometry, courants, inductances=(None, None)):
     # that are members of group n. If no number is specified (i.e.
     # mo_groupselectblock() ), all blocks are selected.
 
-    # Calcule les parametres du primaire
-    if (courants[0] > 0) and (courants[1] == 0):
-        # Power_losses = abs(femm.mo_blockintegral(6))
-        # R = Power_losses / I1**2
+    # Calculate the inductance of the circuit with non-zero current. If both
+    # currents are given, we calculate the mutual inductance.
+    L1, L2 = inductances
+    if (currents[0] > 0) and (currents[1] == 0):
         circ = femm.mo_getcircuitproperties('phase_prim')
-        R = circ[1].real
-        L = abs(circ[2] / circ[0])
-    # Calcule les parametres du secondaire
-    elif (courants[0] == 0) and (courants[1] > 0):
-        # Power_losses = abs(femm.mo_blockintegral(6))
-        # R = Power_losses / I2**2
+        resistance = circ[1].real
+        inductance = abs(circ[2] / circ[0])
+    elif (currents[0] == 0) and (currents[1] > 0):
         circ = femm.mo_getcircuitproperties('phase_sec')
-        R = circ[1].real
-        L = abs(circ[2] / circ[0])
-#        print (circ)
-    # Calcule les parametres mutuelle
+        resistance = circ[1].real
+        inductance = abs(circ[2] / circ[0])
     else:
         femm.mo_groupselectblock()
         # axisymmetric problem, integral is multiplied by 2
         Wm = femm.mo_blockintegral(2) * 2
-        L = (Wm - 0.5*(L1*courants[1]**2 + L2*courants[0]**2)) / (courants[0] *
-                                                                  courants[1])
-        R = 0
-    femm.mo_clearblock()
+        inductance = ((Wm - 0.5 * (L1*currents[1]**2 + L2*currents[0]**2)) /
+                      (currents[0] * currents[1]))
+        resistance = 0
+        femm.mo_clearblock()
 
-    # mo_showdensityplot(legend,gscale,upper_B,lower_B,type)
-    # From manual: Shows the flux density plot with options:
-    # – legend Set to 0 to hide the plot legend or 1 to show the plot legend.
-    # – gscale Set to 0 for a colour density plot or 1 for a grey scale 
-    #   density plot.
-    # – upper_B Sets the upper display limit for the density plot.
-    # – lower_B Sets the lower display limit for the density plot.
-    # – type Type of density plot to display. Valid entries are ’mag’, ’real’,
-    # and ’imag’ for magnitude, real component, and imaginary component of B,
-    # respectively. Alternatively, current density can be displayed by
-    # specifying ’jmag’, ’jreal’, and ’jimag’ for magnitude, real component,
-    # and imaginary component of J, respectively.
+    if kwargs.get('close') is True:
+        femm.closefemm()
 
-#    femm.mo_showdensityplot(1, 0, 2e-3, 0, 'mag')
-    # Commandes liés au logiciel pour fermer correctement le FEMM
-#    femm.mo_close()
-#    femm.mi_close()
-#    femm.closefemm()
-
-    return (L, R)
+    return (inductance, resistance)

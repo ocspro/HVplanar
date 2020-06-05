@@ -1,51 +1,20 @@
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""
-Created on Wed Dec 05 15:30:49 2018
 
-@author: olechrs
-
-###########################################################################
-# Simulation FEMM lancé par Matlab. Il faut spécifier la géometrie
-# des spires (16 valeur) du transformateur où le primaire et le secondaire
-# sont fabriqués comme des circuits imprimés, geoemtrie[16].
-
-
-        Matrices: index 1 pour le primaire (en haut),
-                    index 2 pour le secondaire (en bas)
-
-        |                    l_cuivre        l_cuivre
-        |                   <----> l_entre <---->
-        |<--r_interieur(1)-> ____ <-------> ____        no_sp_prim == 2
-        |___________________|____|_________|____|_____
- y=0___|_____________________________________________| ep_pcb
-        |                           |    |  /\
-        |                            |____|  \/ep_cuivre
-        |<-----r_interieur(2)------>                no_sp_sec == 1
-        |
-        |<---------------r_pcb------------------------>
-        |
- l'axe de symétrie
-
-###########################################################################
-"""
-
-import femm
 from math import pi
 import numpy as np
 import matplotlib.pyplot as plt
 
+import femm
 
-def initial_setup(limite_externe, voltage_high):
-    # Commandes liés au logiciel pour acceder toutes les commandes FEMM
-    # Les commandes prochaines sont lancé par le fichier principal de
-    # l'algorithme génétique pour eviter des éxecuter plusieurs fois. En plus,
-    # le fichier openfemm.m est modifié pour éviter que la fenêtre FEMM
-    # travaille à l'arrière-plan: le drapeu '-windowhide' est ajouté à la
-    # commande au système.
-    femm.openfemm(1)
-    # mi_minimize()
-    # From manual: minimizes the active magnetics input view.
-#    femm.main_minimize()
+
+def initial_setup(limite_externe, voltage_high, **kwargs):
+    '''Start femm and setup problem definition and set boundary condition.'''
+    if kwargs.get('hide') is True:
+        femm.openfemm(1)
+        femm.main_minimize()
+    else:
+        femm.openfemm()
 
     # newdocument(doctype)
     # From manual: Creates a new preprocessor document and opens up a new
@@ -67,10 +36,17 @@ def initial_setup(limite_externe, voltage_high):
     # direction for 2-D planar problems, can also be specified for planar
     # problems. A sixth parameter represents the minimum angle constraint sent
     # to the mesh generator.
-    precision = 1e-9
-    femm.ei_probdef('millimeters', 'axi', precision, 100, 30)
+    if 'precision' in kwargs:
+        precision = kwargs['precision']
+    else:
+        precision = 1e-9
+    if 'min_angle' in kwargs:
+        min_angle = kwargs['min_angle']
+    else:
+        min_angle = 30
+    femm.ei_probdef('millimeters', 'axi', precision, 100, min_angle)
 
-    # Circuit
+    # Circuit parameters
     # From manual: ei_addconductorprop("conductorname", Vc, qc, conductortype)
     # adds a new conductor property with name "conductorname" with either a
     # prescribed voltage or a prescribed total charge. Set the unused property
@@ -79,28 +55,7 @@ def initial_setup(limite_externe, voltage_high):
     femm.ei_addconductorprop('high', voltage_high, 0, 1)
     femm.ei_addconductorprop('zero', 0, 0, 1)
 
-    # Trace de la geometrie
-    # ei_drawrectangle(x1, y1, x2, y2)
-    # From manual: no discription
-
-    # ei selectsegment(x,y)
-    # From manual: Select the line segment closest to (x,y)
-
-    # ei_setsegmentprop("propname", elementsize, automesh, hide,
-    #                   group, "inconductor",)
-    # From manual: Set the select segments to have:
-    # Boundary property "propname"
-    # Local element size along segment no greater than elementsize
-    # automesh: 0 = mesher defers to the element constraint defined by
-    # elementsize, 1 = mesher automatically chooses mesh size along the
-    # selected segments
-    # hide: 0 = not hidden in post-processor, 1 == hidden in post processor
-    # A member of group number group
-    # A member of the conductor specified by the string "inconductor". If the
-    # segment is not part of a conductor, this parameter can be specified as
-    # "<None>".
-
-    # Materiaux
+    # Add materials properties used in the simulation
     # ei_addmaterial(’matname’, ex, ey, qv)
     # From manual: adds a new material with called ’matname’ with the material
     # properties:
@@ -108,14 +63,17 @@ def initial_setup(limite_externe, voltage_high):
     # ey Relative permittivity in the y- or z-direction.
     # qv Volume charge density in units of C/m3
     femm.ei_addmaterial('air', 1, 1, 0)
-    femm.ei_addmaterial('FR4', 4.4, 4.4, 0)
-    femm.ei_addmaterial('Polysterimide', 3.5, 3.5, 0)
-    femm.ei_addmaterial('Teflon', 2.1, 2.1, 0)
-    femm.ei_addmaterial('Silgel', 2.7, 2.7, 0)
-    femm.ei_addmaterial('Midel', 3.15, 3.15, 0)
-    femm.ei_addmaterial('Epoxy', 10, 10, 0)
+    femm.ei_addmaterial('fr4', 4.4, 4.4, 0)
+    femm.ei_addmaterial('polysterimide', 3.5, 3.5, 0)
+    femm.ei_addmaterial('teflon', 2.1, 2.1, 0)
+    femm.ei_addmaterial('silgel', 2.7, 2.7, 0)
+    femm.ei_addmaterial('midel', 3.15, 3.15, 0)
+    femm.ei_addmaterial('epoxy', 10, 10, 0)
+    if 'material' in kwargs:
+        for m in kwargs['material']:
+            femm.ei_addmaterial(*m)
 
-    # Conditions limites
+    # Boundary conditions
     # ei makeABC(n,R,x,y,bc)
     # From manual: creates a series of circular shells that emulate the
     # impedance of an unbounded domain (i.e. an Improvised Asymptotic Boundary
@@ -128,138 +86,276 @@ def initial_setup(limite_externe, voltage_high):
     femm.ei_makeABC(7, limite_externe, 0, 0, 0)
 
 
-def translate_geometry(g):
-    ''' Translates from old to new style of handling geometry parameters '''
-    geometry = []
-    geometry.append(g.turns_primary)
-    geometry.append(g.layers_primary)
-    geometry.append(g.turns_secondary)
-    geometry.append(g.layers_secondary)
-    geometry.append(g.height_pcb_core)
-    geometry.append(g.height_pcb_prepreg)
-    geometry.append(g.height_dielectric)
-    geometry.append(g.height_copper)
-    geometry.append(g.width_copper)
-    geometry.append(g.radius_inner_track)
-    geometry.append(g.width_between_tracks)
-    geometry.append(g.radius_pcb)
-    geometry.append(g.radius_dielectric)
-    if g.material_dielectric == 'fr4':
-        geometry.append(1)
-    elif g.material_dielectric == 'polysterimide':
-        geometry.append(2)
-    elif g.material_dielectric == 'teflon':
-        geometry.append(3)
+def coords_rectangle(x0, y0, dx, dy):
+    '''Return array with the coordinates of the two opposite corners of a
+    rectangle.'''
+    return (x0, y0, x0+dx, y0+dy)
+
+
+def get_z_coord_copper_layer(g):
+    '''Calculate z coordinate of copper layers depending on the number of
+    copper layers in each pcb.'''
+    z_coord_first_layer = (g.height_dielectric + g.height_gap, -g.height_gap)
+    z_coords = []
+    if g.layers_primary == 2:
+        z_coords.append((z_coord_first_layer[0],
+                         z_coord_first_layer[0] + g.height_copper +
+                         g.height_pcb_core))
+    elif g.layers_primary == 4:
+        z_coords.append((z_coord_first_layer[0],
+                         z_coord_first_layer[0] + g.height_copper +
+                         g.height_pcb_prepreg,
+                         z_coord_first_layer[0] + g.height_copper * 2 +
+                         g.height_pcb_prepreg + g.height_pcb_core,
+                         z_coord_first_layer[0] + g.height_copper * 3 +
+                         g.height_pcb_prepreg * 2 + g.height_pcb_core))
     else:
-        geometry.append(-1)
-        print('Error: cannot translate material name: {}'.format(
-              g.material_dielectric))
-    geometry.append(g.height_gap)
-    geometry.append(g.height_gel)
-    geometry.append(g.radius_gel)
-    return geometry
+        z_coords.append((z_coord_first_layer[0],))
+
+    if g.layers_secondary == 2:
+        z_coords.append((z_coord_first_layer[1],
+                         z_coord_first_layer[1] - g.height_copper -
+                         g.height_pcb_core))
+    elif g.layers_secondary == 4:
+        z_coords.append((z_coord_first_layer[1],
+                         z_coord_first_layer[1] - g.height_copper -
+                         g.height_pcb_prepreg,
+                         z_coord_first_layer[1] - g.height_copper * 2 -
+                         g.height_pcb_prepreg - g.height_pcb_core,
+                         z_coord_first_layer[1] - g.height_copper * 3 -
+                         g.height_pcb_prepreg * 2 - g.height_pcb_core))
+    else:
+        z_coords.append((z_coord_first_layer[1],))
+
+    return z_coords
 
 
-def set_conductor_boundry(coords, volt):
-    '''
-    Set voltage of the four sides of a square conductor to either 0 or 1 V
-    INPUT: corner, length and height of conductor
-    '''
-    # ei_selectsegment(x,y)
-    # From manual: Select the line segment closest to (x,y)
+def set_conductor_boundry(coords, in_conductor):
+    '''Set voltage potential of the four sides of a square conductor.'''
     femm.ei_selectsegment(coords[0], np.average((coords[1], coords[3])))
     femm.ei_selectsegment(np.average((coords[0], coords[2])), coords[1])
     femm.ei_selectsegment(coords[2], np.average((coords[1], coords[3])))
     femm.ei_selectsegment(np.average((coords[0], coords[2])), coords[3])
-    if volt == 1:
+    if in_conductor == 1:
         femm.ei_setsegmentprop('<None>', 0, 1, 0, 0, 'high')
-    elif volt == 0:
+    elif in_conductor == 0:
         femm.ei_setsegmentprop('<None>', 0, 1, 0, 0, 'zero')
     femm.ei_clearselected()
 
 
 def set_conductor_label(coords, label_name, label_dict):
-    '''
-    Set a block label inside a square conductor, and give the block label
-    properties. INPUT: corner, length and height of conductor, label name and
-    label dictionary
-    '''
-    # ei_addblocklabel(x,y)
-    # From manual: Add a new block label at (x,y)
+    '''Set a block label inside a square conductor and set label properties.'''
     label_coord = (np.average((coords[0], coords[2])),
                    np.average((coords[1], coords[3])))
     femm.ei_addblocklabel(*label_coord)
+    femm.ei_selectlabel(*label_coord)
+    # No mesh is needed inside conductors
+    femm.ei_setblockprop('<No Mesh>', 1, 0, 0)
+    femm.ei_clearselected()
     label_dict[label_name] = label_coord
-    return label_dict
 
 
 def draw_conductor(coords, in_conductor, label_name, label_dict):
-    ''' Draw rectabngualr shapeof conducture in problem and add label '''
+    '''Draw rectangular conductor, set boundary conductions and add label.'''
     femm.ei_drawrectangle(*coords)
-    # ajouter la tension pour les trace du bobinage du primaire
     set_conductor_boundry(coords, in_conductor)
-    # label du bobinage du primaire
-    label_dict = set_conductor_label(coords, label_name, label_dict)
-    return label_dict
+    set_conductor_label(coords, label_name, label_dict)
 
 
-def add_conductors(geometry, z0, dz, label_dict):
-    ''' Add all conductors of a pcb to the problem '''
-    no_spires_prim = geometry[0]
-    no_couches_prim = geometry[1]
-    no_spires_sec = geometry[2]
-    no_couches_sec = geometry[3]
-    ep_cuivre = geometry[7]
-    l_cuivre = geometry[8]
-    r_interieur = geometry[9]
-    l_entre = geometry[10]
+def add_conductors(tg, label_dict):
+    '''Add all conductors of primary and secondary side pcbs
 
-    ep_couches = get_height_between_layers(no_couches_prim, z0[0], dz)
-    for c in range(no_couches_prim):
-        for i in range(no_spires_prim):
-            # coordiantes of conductor
-            coords_conductor = coords_of_rectangle(r_interieur[0] +
-                                                   (l_entre[0] + l_cuivre) * i,
-                                                   ep_couches[c], l_cuivre,
-                                                   ep_cuivre)
-            # desiner la conductrice, ajouter la tension  et le label
-            label_dict = draw_conductor(coords_conductor, 1,
-                                        'prim' + str(i + c * no_spires_prim),
-                                        label_dict)
-    # définition du bobinage du secondaire
-    ep_couches = get_height_between_layers(no_couches_prim, z0[1], -dz)
-    for c in range(no_couches_sec):
-        for i in range(no_spires_sec):
-            coords_conductor = coords_of_rectangle(r_interieur[1] +
-                                                   (l_entre[1] + l_cuivre) * i,
-                                                   ep_couches[c], l_cuivre,
-                                                   -ep_cuivre)
-            # desiner la conductrice, ajouter la tension  et le label
-            label_dict = draw_conductor(coords_conductor, 0,
-                                        'sec' + str(i + c * no_spires_sec),
-                                        label_dict)
+    Args:
+        tg (TransformerGeometry): contains all geometry information needed
+        to build conductors in the problem.
+        label_dict (dict): stores label coordinates
+    '''
+
+    z_copper = get_z_coord_copper_layer(tg)
+    # adding conductors on the primary side
+    for c in range(tg.layers_primary):
+        for i in range(tg.turns_primary):
+            coords_conductor = coords_rectangle(tg.radius_inner_track[0] +
+                                                (tg.width_between_tracks[0] +
+                                                 tg.width_copper) * i,
+                                                z_copper[0][c],
+                                                tg.width_copper,
+                                                tg.height_copper)
+            draw_conductor(coords_conductor,
+                           1,
+                           'prim' + str(i + c * tg.turns_primary),
+                           label_dict)
+    # adding conductors on the secondary side
+    for c in range(tg.layers_secondary):
+        for i in range(tg.turns_secondary):
+            coords_conductor = coords_rectangle(tg.radius_inner_track[1] +
+                                                (tg.width_between_tracks[1] +
+                                                 tg.width_copper) * i,
+                                                z_copper[1][c],
+                                                tg.width_copper,
+                                                -tg.height_copper)
+            draw_conductor(coords_conductor,
+                           0,
+                           'sec' + str(i + c * tg.turns_secondary),
+                           label_dict)
 
 
-def round_conductor_edges(geometry, label_dict):
-    ''' round the edges of conductors that are critical to the peak field
+def add_pcbs(tg, label_dict):
+    '''Add primary and secondary side pcbs.
+
+    Args:
+        tg (TransformerGeometry): contains all geometry information needed
+        to build conductors in the problem.
+        label_dict (dict): stores coordinates
+    '''
+
+    # coordinates of the PCB on the primary side
+    if tg.layers_primary == 1 or tg.layers_primary == 2:
+        coords_pcb_prim = coords_rectangle(0,
+                                           tg.height_dielectric +
+                                           tg.height_copper + tg.height_gap,
+                                           tg.radius_pcb,
+                                           tg.height_pcb_core)
+    elif tg.layers_primary == 4:
+        coords_pcb_prim = coords_rectangle(0,
+                                           tg.height_dielectric +
+                                           tg.height_copper + tg.height_gap,
+                                           tg.radius_pcb,
+                                           tg.height_pcb_core +
+                                           2 * tg.height_pcb_prepreg +
+                                           2 * tg.height_copper)
+    else:
+        print('Unknown number of layers on primary side')
+        femm.closefemm()
+        return (0, 0)
+
+    # coordinates of the PCB on the secondary side
+    if tg.layers_secondary == 1 or tg.layers_secondary == 2:
+        coords_pcb_sec = coords_rectangle(0,
+                                          -tg.height_copper - tg.height_gap,
+                                          tg.radius_pcb,
+                                          -tg.height_pcb_core)
+    elif tg.layers_secondary == 4:
+        coords_pcb_sec = coords_rectangle(0,
+                                          -tg.height_copper - tg.height_gap,
+                                          tg.radius_pcb,
+                                          -tg.height_pcb_core -
+                                          2 * tg.height_pcb_prepreg -
+                                          2 * tg.height_copper)
+    else:
+        print('Unknown number of layers on secondary side')
+        femm.closefemm()
+        return (0)
+    femm.ei_drawrectangle(*coords_pcb_prim)
+    femm.ei_drawrectangle(*coords_pcb_sec)
+    label_dict['PCB_prim'] = coords_pcb_prim
+    label_dict['PCB_sec'] = coords_pcb_sec
+
+
+def add_isolation(tg):
+    '''Add isolation disc and surrounding gel or liquid.'''
+    # coordinates of isolation disc
+    coords_isolation = coords_rectangle(0, 0, tg.radius_dielectric,
+                                        tg.height_dielectric)
+    # coordinates of gel or liquid surrounding the transformer
+    coords_gel = coords_rectangle(0, -tg.height_gel, tg.radius_gel,
+                                  2 * tg.height_gel + tg.height_dielectric)
+    femm.ei_drawrectangle(*coords_isolation)
+    femm.ei_drawrectangle(*coords_gel)
+
+
+def add_block_labels(tg, label_dict):
+    '''Add block labels to pcbs, air, isolation disc, isolation gel/liquid.'''
+    # Add block labels
+    # ei seteditmode(editmode)
+    # From manual: Sets the current editmode to:
+    # – "nodes" - nodes
+    # – "segments" - line segments
+    # – "arcsegments" - arc segments
+    # – "blocks" - block labels
+    # – "group" - selected group
+    femm.ei_seteditmode('blocks')
+
+    # ei addblocklabel(x,y)
+    # From manual: Add a new block label at (x,y)
+
+    # labels for the PCBs
+    coords = [2, tg.height_dielectric + tg.height_pcb_core / 2.]
+    femm.ei_addblocklabel(*coords)
+    label_dict['pcb_prim_label'] = coords
+
+    coords = [2, - tg.height_pcb_core / 2.]
+    femm.ei_addblocklabel(*coords)
+    label_dict['pcb_sec_label'] = coords
+
+    # label for the surrounding air
+    coords = [2, tg.height_dielectric * 2 + tg.height_gel]
+    femm.ei_addblocklabel(*coords)
+    label_dict['air'] = coords
+
+    # label for the dilectric gel or liquid surrounding the transformer
+    coords = [tg.radius_pcb + 2, tg.height_dielectric + tg.height_gel / 2.]
+    femm.ei_addblocklabel(*coords)
+    label_dict['gel'] = coords
+
+    # label for the isolation disc
+    coords = [2, tg.height_dielectric / 2.]
+    femm.ei_addblocklabel(*coords)
+    label_dict['isolant'] = coords
+
+    # Set material type for all blocks
+    # ei setblockprop("blockname", automesh, meshsize, group) Set the selected
+    # block labels to have the properties: Block property "blockname".
+    # automesh: 0 = mesher defers to mesh size constraint defined in meshsize,
+    # 1 = mesher automatically chooses the mesh density. meshsize: size
+    # constraint on the mesh in the block marked by this label. A member of
+    # group number group
+
+    femm.ei_selectlabel(*label_dict['pcb_prim_label'])
+    femm.ei_selectlabel(*label_dict['pcb_sec_label'])
+    femm.ei_setblockprop('fr4', 1, 0, 'None')
+    femm.ei_clearselected()
+
+    femm.ei_selectlabel(*label_dict['air'])
+    femm.ei_setblockprop('air', 1, 0, 'None')
+    femm.ei_clearselected()
+
+    femm.ei_selectlabel(*label_dict['gel'])
+    femm.ei_setblockprop('midel', 1, 0, 'None')
+    femm.ei_clearselected()
+
+    femm.ei_selectlabel(*label_dict['isolant'])
+    femm.ei_setblockprop(tg.material_dielectric.lower(), 1, 0, 'None')
+    femm.ei_clearselected()
+
+
+def round_conductor_edges(tg, label_dict, segment_angle):
+    '''Round the edges of conductors that are critical to the peak field
     calculations. These conductors will be the ones closest to the dielectric
     material, and both inner and outer conductor corners
-    geometry - geometry of transformer problem
-    label_dict - label dictionary for all transformer elements
+
+    Args:
+        tg (:obj:'TransformerGeometry'): contains all geometry information
+        needed to build conductors in the problem.
+        label_dict (dict): stores coordinates
     '''
+
     # Define parameters of the rounding
-    turns = geometry[0]
-    conductor_height = geometry[7]
-    conductor_width = geometry[8]
+    conductor_height = tg.height_copper
+    conductor_width = tg.width_copper
     corner_radius = .2 * conductor_height  # percentage of conductor height
     segment_length = 0.004
+    if segment_angle is None:
+        segment_angle = 1
 
     # Find primary side corners and add new labels for the rounded edge
+    turns = tg.turns_primary
     label_dict['edge0'] = (np.array(label_dict['prim0']) +
                            np.array((-conductor_width, -conductor_height))/2.0)
     label_dict['edge1'] = (np.array(label_dict['prim' + str(turns - 1)]) +
                            np.array((conductor_width, -conductor_height))/2.0)
     # Find secondary side corners and add new labels for the rounded edge
+    turns = tg.turns_secondary
     label_dict['edge2'] = (np.array(label_dict['sec0']) +
                            np.array((-conductor_width, conductor_height))/2.0)
     label_dict['edge3'] = (np.array(label_dict['sec' + str(turns - 1)]) +
@@ -269,27 +365,95 @@ def round_conductor_edges(geometry, label_dict):
         corner = label_dict[e]
         femm.ei_createradius(corner[0], corner[1], corner_radius)
         femm.ei_selectarcsegment(*corner)
-        femm.ei_setarcsegmentprop(1, '<None>', 0, 0, 'high')
+        femm.ei_setarcsegmentprop(segment_angle, '<None>', 0, 0, 'high')
+        femm.ei_clearselected()
     for e in ['edge2', 'edge3']:
         corner = label_dict[e]
         femm.ei_createradius(corner[0], corner[1], corner_radius)
         femm.ei_selectarcsegment(*corner)
-        femm.ei_setarcsegmentprop(1, '<None>', 0, 0, 'zero')
+        femm.ei_setarcsegmentprop(segment_angle, '<None>', 0, 0, 'zero')
+        femm.ei_clearselected()
     increase_pcb_mesh(conductor_height, conductor_height*2, segment_length,
                       label_dict)
 
 
-def trapezoidal_conductor_edges(geometry, label_dict):
-    ''' make the edges of conductors trapezoidal for those that are critical to
+def modify_tracks(tg, label_dict, segment_angle):
+    '''Modify tracks as specified by the user using the FancyTrack class.
+
+    Args:
+        tg (:obj:'TransformerGeometry'): contains all geometry information
+        needed to build conductors in the problem.
+        label_dict (dict): stores label coordinates
+    '''
+    if segment_angle is None:
+        segment_angle = 1
+    for track in tg.tracks:
+        if track.side_v == 'high':
+            label_v = 'prim'
+            turns_tot = tg.turns_primary
+        else:
+            label_v = 'sec'
+            turns_tot = tg.turns_secondary
+        if track.track in ['outer', 'inner']:
+            if track.track == 'outer':
+                track_no = turns_tot - 1 + turns_tot * track.layer
+            else:
+                track_no = turns_tot * track.layer
+        coords = np.array(label_dict[label_v + str(track_no)])
+        if track.side_h == 'outer':
+            coords = coords + np.array((tg.width_copper / 2.0, 0))
+        else:
+            coords = coords + np.array((-tg.width_copper / 2.0, 0))
+        if track.elongation is not None:
+            coords = _modify_tracks_elongate(tg, track, coords)
+        _modify_tracks_round(tg, track, coords, segment_angle)
+
+
+def _modify_tracks_round(tg, track, coords, segment_angle):
+    # Define parameters of the rounding
+    corner_radius = .2 * tg.height_copper  # percentage of conductor height
+
+    if track.side_v == 'high':
+        delta_vert = -tg.height_copper / 2.0
+        volt_potential = 'high'
+    else:
+        delta_vert = tg.height_copper / 2.0
+        volt_potential = 'zero'
+    if track.rounding in ['single', 'both']:
+        corner = coords + np.array((0, delta_vert))
+        femm.ei_createradius(corner[0], corner[1], corner_radius)
+        femm.ei_selectarcsegment(*corner)
+        femm.ei_setarcsegmentprop(segment_angle, '<None>', 0, 0,
+                                  volt_potential)
+    if track.rounding == 'both':
+        corner = coords - np.array((0, delta_vert))
+        femm.ei_createradius(corner[0], corner[1], corner_radius)
+        femm.ei_selectarcsegment(*corner)
+        femm.ei_setarcsegmentprop(segment_angle, '<None>', 0, 0,
+                                  volt_potential)
+
+
+def _modify_tracks_elongate(tg, track, coords):
+    femm.ei_selectsegment(*coords)
+    femm.ei_movetranslate2(track.elongation, 0, 1)
+    femm.ei_clearselected()
+    return coords + np.array((track.elongation, 0))
+
+
+def trapezoidal_conductor_edges(tg, label_dict):
+    '''Make the edges of conductors trapezoidal for those that are critical to
     the peak field calculations. These conductors will be the ones closest to
     the dielectric material, and both inner and outer conductor corners.
-    geometry - geometry of transformer problem
-    label_dict - label dictionary for all transformer elements
+
+    Args:
+        tg (:obj:'TransformerGeometry'): contains all geometry information
+        needed to build conductors in the problem.
+        label_dict (dict): stores label coordinates
     '''
     # Define parameters of the rounding
-    turns = geometry[0]
-    conductor_height = geometry[7]
-    conductor_width = geometry[8]
+    turns = tg.turns_primary
+    conductor_height = tg.height_copper
+    conductor_width = tg.width_copper
     cut_in_length = 2 * conductor_height  # percentage of conductor height
     corner_radius = 1.7 * conductor_height
     ledge_height = 0.005
@@ -332,6 +496,7 @@ def trapezoidal_conductor_edges(geometry, label_dict):
     label_dict['edge1corner'] = outer_corner + np.array((-cut_in_length, 0))
 
     # Secondary inner corner
+    turns = tg.turns_secondary
     inner_corner = (np.array(label_dict['sec0']) +
                     np.array((-conductor_width/2., conductor_height/2.)))
     femm.ei_selectsegment(*(inner_corner +
@@ -398,8 +563,17 @@ def trapezoidal_conductor_edges(geometry, label_dict):
 
 
 def increase_pcb_mesh(cut_in, dz, segment_length, label_dict):
-    ''' Set segment size to decrease mesh size along edge of PCB where the
-    field is high'''
+    '''Decrease segment size to increase mesh along edge of PCB where the
+    field is high.
+
+    Args:
+        cut_in (float): how far along the pcb edge from the conductor where the
+        segment length is decreased
+        dz (float): copper height of conductors
+        segment_length (float): specifiy segment length in femm
+        label_dict (dict): stores label coordinates
+    '''
+
     pcb_segment = []
     pcb_node = []
     pcb_node.append((np.array(label_dict['edge0']) +
@@ -426,38 +600,42 @@ def increase_pcb_mesh(cut_in, dz, segment_length, label_dict):
 
 
 def add_guard(geometry, guard, label_dict):
-    ''' Add guard ring(s) in the problem and add a label.
-    geometry - geometry list of the transformer
-    guard - Guard object
-    label_dict - name of the label dictionary
+    ''' Add guard ring(s) in the problem
+
+    Args:
+        tg (TransformerGeometry): contains all geometry information needed
+        to build conductors in the problem.
+        guard (:obj:'list: of :obj:'Guard'): contains guard geometry
+        label_dict (dict): stores label coordinates
     '''
-    if isinstance(guard, (list, tuple)):
-        for idx, g in enumerate(guard):
-            if g.gtype == 'Ring':
-                draw_guard_ring(g.distance, g.gap, g.radius, g.polarity,
-                                'guard' + str(idx), label_dict)
-            elif g.gtype == 'Trench':
-                draw_guard_trench(geometry, g, 'trench' + str(idx), label_dict)
-    else:
-        if guard.gtype == 'Ring':
-                draw_guard_ring(guard.distance, guard.gap, guard.radius,
-                                guard.polarity, 'guard0', label_dict)
-        elif guard.gtype == 'Trench':
-            draw_guard_trench(geometry, guard, 'trench0', label_dict)
+
+    if not isinstance(guard, (list, tuple)):
+        guard = [guard, ]
+    for idx, g in enumerate(guard):
+        if g.gtype == 'Ring':
+            draw_guard_ring(g.distance, g.gap, g.radius, g.polarity,
+                            'guard' + str(idx), label_dict)
+        elif g.gtype == 'Trench':
+            draw_guard_trench(geometry, g, 'trench' + str(idx), label_dict)
 
 
 def draw_guard_ring(distance, gap, radius, polarity, label_name, label_dict):
-    ''' Draw circular shape of guard ring in the problem and add a label.
-    distance - distance in r-plane from edge of PCB to edge of guard ring
-    gap - distance in z-plane from edge of PCB to edge of guard ring
-    radius- radius of the guard ring conductor
-    polarity - attach the gaurd ring to high side or low side. Positive
-    polarity sets the guard ring to the upper side of the dielectric and adds
-    it ot the "high" conductor
-    label_name - name of this conductor that is stored in the label dictionary
-    label_dict - dictionary that stores label coordinates
+    '''Draw circular shape of guard ring in the problem and add a label.
+
+    Args:
+        distance (float): distance in r-plane from edge of PCB to edge of
+        guard ring
+        gap (float): distance in z-plane from edge of PCB to edge of guard ring
+        radius (float): radius of the guard ring conductor
+        polarity (int): attach the gaurd ring to high side or low side.
+        Polarity higher than zero sets the guard ring to the upper side of the
+        dielectric. Else the guard ring is set to lower side.
+        label_name (str): name of this conductor that is stored in the label
+        dictionary
+        label_dict (dict): stores label coordinates
     '''
-    max_angle = 1
+
+    max_angle = 1  # arc_section angle, affects finess of mesh.
     # high or low side?
     if polarity > 0:
         origin = label_dict['PCB_prim']
@@ -503,14 +681,18 @@ def draw_guard_ring(distance, gap, radius, polarity, label_name, label_dict):
     femm.ei_clearselected()
 
 
-def draw_guard_trench(geometry, trench, label_name, label_dict):
+def draw_guard_trench(tg, trench, label_name, label_dict):
+    '''Draw a trench on the outside of turn closest to the dielectric.
+
+    Args:
+        tg (:obj:'TransformerGeometry'): contains all geometry information
+        trench (:obj:'GuardTrench'): trench guard geometry
+        label_name (str): label that identifies the guard in the dict
+        label_dict (dict): stores label coordinates
     '''
-    Draw a trench on the outside of turn closest to the dielectric. The trench
-    is defined by the GuardTrench class. The trench is drawn on the upper side
-    if polarity is higher than 0. Else, it is drawn on the bottom.
-    '''
-    conductor_height = geometry[7]
-    conductor_width = geometry[8]
+
+    conductor_height = tg.height_copper
+    conductor_width = tg.width_copper
     max_angle = 2
     elementsize = 0.05
     if trench.inner:
@@ -518,7 +700,7 @@ def draw_guard_trench(geometry, trench, label_name, label_dict):
         turns = 1
     else:
         sign = 1
-        turns = geometry[0]
+        turns = tg.turns_primary
 
     # find starting point
     if trench.polarity:
@@ -578,31 +760,8 @@ def draw_guard_trench(geometry, trench, label_name, label_dict):
     femm.ei_clearselected()
 
 
-def get_height_between_layers(no_layers, initial_value, d_height):
-    '''
-    return an array with the height between copper layers in the PCB depending
-    on the number of layers and geometry parameters
-    '''
-    if no_layers == 1:
-        height = (initial_value,)
-    elif no_layers == 2:
-        height = (initial_value, initial_value + d_height)
-    elif no_layers == 4:
-        height = np.cumsum([initial_value] + list(d_height)).tolist()
-    else:
-        print ('get_height_between_layers(): invalid number of layers')
-    return height
-
-
-def coords_of_rectangle(x0, y0, dx, dy):
-    '''
-    Return array with the coordinates of the two opposite corners of a
-    rectangle. Useful as femm commands don't accept arrays as input.
-    '''
-    return (x0, y0, x0+dx, y0+dy)
-
-
 def draw_field_contour(coords_start, coords_end, filename=None):
+    '''Make (and save) countour plot.'''
     # eo_seteditmode(mode)
     # From manual: Sets themode of the postprocessor to point, contour, or area
     # mode. Valid entries for mode are "point", "contour", and "area".
@@ -639,19 +798,19 @@ def draw_field_contour(coords_start, coords_end, filename=None):
     # 0 Multi-column text with legend
     # 1 Multi-column text with no legend
     # 2 Mathematica-style formatting
-    if filename:
-        femm.eo_makeplot(4, 5000, filename, 0)
-    else:
-        femm.eo_makeplot(4, 5000)
 
     # eo_clearcontour
     # From manual: Clear a prevously defined contour
-    femm.eo_clearcontour()
+    if filename:
+        femm.eo_makeplot(4, 5000, filename, 0)
+        femm.eo_clearcontour()
+    else:
+        femm.eo_makeplot(4, 5000)
 
 
 def skip_last(iterator):
-    ''' generator that skips the last entry. Used when reading output from
-    contour plots as the final line of the output file is empty '''
+    '''Generator that skips the last entry. Used when reading output from
+    contour plots as the final line of the output file is empty.'''
     prev = next(iterator)
     for item in iterator:
         yield prev
@@ -659,8 +818,8 @@ def skip_last(iterator):
 
 
 def read_field_contour_file(filename):
-    ''' read csv file of a contour plot. Returns the text string for the units
-    in the x and y axis, and the data as two lists [x] [y] '''
+    '''Read csv file of a contour plot. Returns the text string for the units
+    in the x and y axis, and the data as two lists [x] [y].'''
     with open(filename, 'r') as f:
         unit_xaxis = f.readline()
         unit_yaxis = f.readline()
@@ -672,17 +831,14 @@ def read_field_contour_file(filename):
 
 
 def get_field_contour_max(filename):
-    ''' read contour out file and return the maximum value '''
+    '''Read contour out file and return the maximum value.'''
     unitx, unity, values = read_field_contour_file(filename)
     return np.max(values[1])
 
 
 def save_field_contour(conductor_height, label_dict, guard=None):
-    ''' make field contour plots of critical points in the transformer
-    geometry. The critical points are at the inner and outer turn corners as
-    well as between the guard rings if included.
-    label_dict - dictionary containing label coordinates
-    '''
+    '''Make field contour plots of critical points in the transformer geometry;
+    edges and guards.'''
     edge_radius = conductor_height * .2
     # edge0 ++ == upper inner conductor
     # edge1 -+ == upper outer conductor
@@ -723,6 +879,7 @@ def plot_field_contour(filename):
 
 
 def set_view(view, guard, label_dict):
+    '''Change view (and optionally save files).'''
     for v, l in get_zoom_coords_corners(view, label_dict):
         femm.eo_zoom(*v)
         if view.filename:
@@ -739,6 +896,7 @@ def set_view(view, guard, label_dict):
 
 
 def get_zoom_coords_corners(view, label_dict):
+    '''Set view for edges.'''
     span = np.array((view.span_r, view.span_z)) / 2.0
     zoom_coords = []
     labels = []
@@ -751,6 +909,7 @@ def get_zoom_coords_corners(view, label_dict):
 
 
 def get_zoom_coords_guard(view, guard, label_dict):
+    '''Set view for guards.'''
     zoom_coords = []
     labels = []
     if not isinstance(guard, (list, tuple)):
@@ -774,202 +933,58 @@ def get_zoom_coords_guard(view, guard, label_dict):
     return zip(zoom_coords, labels)
 
 
-def calc_field_distribution(transformer_geometry, voltage_high=1, view=None):
+def calc_field_distribution(tg, voltage_high=1, view=None, **kwargs):
+    ''' Setup of electro-static problem in femm to calculate capacitance
+    between primary and secondary side of planar transformer. Additionally,
+    electric field can be investigated
 
-    # Initiation de parametres
-    geometry = translate_geometry(transformer_geometry)
-    # Grandeurs de la géometrie
-    no_spires_prim = geometry[0]
-    no_couches_prim = geometry[1]
-    no_spires_sec = geometry[2]
-    no_couches_sec = geometry[3]
-    ep_pcb_noyau = geometry[4]
-    ep_pcb_prepreg = geometry[5]
-    ep_dielectric = geometry[6]
-    ep_cuivre = geometry[7]
-#    l_cuivre = geometry[8]
-#    r_interieur = geometry[9]
-#    l_entre = geometry[10]
-    r_pcb = geometry[11]
-    r_dielectrique = geometry[12]
-    materiel_dielectrique = geometry[13]
-    ep_gap = geometry[14]
-    ep_gel = geometry[15]
-    r_gel = geometry[16]
+    Args:
+        tg (:obj:'TransformerGeometry'): tg contains all geometry information
+        needed to solve the problem.
+        voltage_high (float): Voltage potential of the primary side.
+        view (:obj:'View'): Save images of edges and guards.
 
-    # condition aux limits, limit externe de la simulation
-    limits_externes = 2 * r_dielectrique
-    # dictionnaire pour gérer les etiquette de la géometrie
-    etiquettes_dict = {}
+    Returns:
+        capacitance (float): calculated capacitance between primary and
+        secondary side of planar transformer.
+    '''
 
-    initial_setup(limits_externes, voltage_high)
+    etiquettes_dict = {}  # Dictionary to store coordinates of nodes
 
-    # définition de l'dielectrique
-    coords_disc_dielectrique = coords_of_rectangle(0, 0, r_dielectrique,
-                                                   ep_dielectric)
-    # définition du gel dielectrique
-    coords_gel_dielectrique = coords_of_rectangle(0, -ep_gel, r_gel,
-                                                  2*ep_gel+ep_dielectric)
-    # définition du PCB
-    coords_pcb_prim = 0
-    coords_pcb_sec = 0
-    z0 = (ep_dielectric + ep_gap, -ep_gap)
+    # initialitiation of the electro-static problem
+    boundary_radius = 2 * tg.radius_dielectric
+    initial_setup(boundary_radius, voltage_high, **kwargs)
 
-    # dessiner le bobinage
-    if no_couches_prim == 1:
-        # print('une couche par PCB')
-        # définition du bobinage
-        dz = 0
-        add_conductors(geometry, z0, dz, etiquettes_dict)
+    # draw conductors on primary and secondary sides
+    add_conductors(tg, etiquettes_dict)
+    add_pcbs(tg, etiquettes_dict)
+    add_isolation(tg)
+    add_block_labels(tg, etiquettes_dict)
 
-        # définition du PCB au primaire
-        coords_pcb_prim = coords_of_rectangle(0, ep_dielectric + ep_cuivre +
-                                              ep_gap, r_pcb, ep_pcb_noyau)
-        # définition du PCB au secondaire
-        coords_pcb_sec = coords_of_rectangle(0, -ep_cuivre - ep_gap, r_pcb,
-                                             -ep_pcb_noyau)
+    round_conductor_edges(tg, etiquettes_dict, kwargs.get('segment_angle'))
 
-    elif no_couches_prim == 2:
-        # print('deux couches par PCB')
-        # définition du bobinage
-        dz = ep_cuivre + ep_pcb_noyau
-        add_conductors(geometry, z0, dz, etiquettes_dict)
-        # définition du PCB au primaire
-        coords_pcb_prim = coords_of_rectangle(0, ep_dielectric + ep_cuivre +
-                                              ep_gap, r_pcb, ep_pcb_noyau)
-        # définition du PCB au secondaire
-        coords_pcb_sec = coords_of_rectangle(0, -ep_cuivre - ep_gap, r_pcb,
-                                             -ep_pcb_noyau)
+#    if tg.edge_type == 'Round':
+#        round_conductor_edges(tg, etiquettes_dict)
+#    elif tg.edge_type == 'Trapezoidal':
+#        trapezoidal_conductor_edges(tg, etiquettes_dict)
+    if tg.tracks:
+        modify_tracks(tg, etiquettes_dict, kwargs.get('segment_angle'))
 
-    elif no_couches_prim == 4:
-        # print('quatre couches par PCB')
-        # définition du bobinage
-        dz = np.array((ep_cuivre + ep_pcb_prepreg, ep_cuivre + ep_pcb_noyau,
-                       ep_cuivre + ep_pcb_prepreg))
-        add_conductors(geometry, z0, dz, etiquettes_dict)
-        # définition du isolant au primaire
-        coords_pcb_prim = coords_of_rectangle(0, ep_dielectric + ep_cuivre +
-                                              ep_gap, r_pcb, ep_pcb_noyau +
-                                              2*ep_pcb_prepreg + 3*ep_cuivre)
-        # définition du isolant au secondaire
-        coords_pcb_sec = coords_of_rectangle(0, -ep_cuivre - ep_gap, r_pcb,
-                                             -ep_pcb_noyau - 2*ep_pcb_prepreg -
-                                             3*ep_cuivre)
-    else:
-        'paramètre de couche inconnu'
-        return 0
-
-    femm.ei_drawrectangle(*coords_disc_dielectrique)
-    femm.ei_drawrectangle(*coords_gel_dielectrique)
-    femm.ei_drawrectangle(*coords_pcb_prim)
-    femm.ei_drawrectangle(*coords_pcb_sec)
-    etiquettes_dict['PCB_prim'] = coords_pcb_prim
-    etiquettes_dict['PCB_sec'] = coords_pcb_sec
-
-    if transformer_geometry.edge_type == 'Round':
-        round_conductor_edges(geometry, etiquettes_dict)
-    elif transformer_geometry.edge_type == 'Trapezoidal':
-        trapezoidal_conductor_edges(geometry, etiquettes_dict)
-
-    if transformer_geometry.guard:
-        add_guard(geometry, transformer_geometry.guard, etiquettes_dict)
+    if tg.guard:
+        add_guard(tg, tg.guard, etiquettes_dict)
 
     # mi zoomnatural()
     # From manual: zooms to a “natural” view with sensible extents.
-    femm.ei_zoomnatural
+    femm.ei_zoomnatural()
 
-    # Ajoute de block labels, étiquettes dans les surfaces
-    # ei seteditmode(editmode)
-    # From manual: Sets the current editmode to:
-    # – "nodes" - nodes
-    # – "segments" - line segments
-    # – "arcsegments" - arc segments
-    # – "blocks" - block labels
-    # – "group" - selected group
-    femm.ei_seteditmode('blocks')
-
-    # ei addblocklabel(x,y)
-    # From manual: Add a new block label at (x,y)
-
-    # label pour le PCB
-    coords = [1, ep_gap + ep_dielectric + ep_pcb_noyau / 2.]
-    femm.ei_addblocklabel(*coords)
-    etiquettes_dict['pcb_prim'] = coords
-
-    coords = [1, - ep_gap - ep_pcb_noyau / 2.]
-    femm.ei_addblocklabel(*coords)
-    etiquettes_dict['pcb_sec'] = coords
-
-    # label pour l'air autour
-    coords = [1, ep_dielectric * 2 + ep_gel]
-    femm.ei_addblocklabel(*coords)
-    etiquettes_dict['air'] = coords
-
-    # label pour le gel autour
-    coords = [r_dielectrique, ep_dielectric + ep_gap + ep_gel / 2.]
-    femm.ei_addblocklabel(*coords)
-    etiquettes_dict['gel'] = coords
-
-    # label pour l'isolant
-    coords = [2, ep_dielectric / 2.]
-    femm.ei_addblocklabel(*coords)
-    etiquettes_dict['isolant'] = coords
-
-    # Associer blocks avec materiaux
-    # ei setblockprop("blockname", automesh, meshsize, group) Set the selected
-    # block labels to have the properties: Block property "blockname".
-    # automesh: 0 = mesher defers to mesh size constraint defined in meshsize,
-    # 1 = mesher automatically chooses the mesh density. meshsize: size
-    # constraint on the mesh in the block marked by this label. A member of
-    # group number group
-
-    femm.ei_selectlabel(*etiquettes_dict['pcb_prim'])
-    femm.ei_selectlabel(*etiquettes_dict['pcb_sec'])
-    femm.ei_setblockprop('FR4', 1, 0, 'None')
-    femm.ei_clearselected()
-
-    femm.ei_selectlabel(*etiquettes_dict['air'])
-    femm.ei_setblockprop('air', 1, 0, 'None')
-    femm.ei_clearselected()
-
-    femm.ei_selectlabel(*etiquettes_dict['gel'])
-    femm.ei_setblockprop('Midel', 1, 0, 'None')
-    femm.ei_clearselected()
-
-    femm.ei_selectlabel(*etiquettes_dict['isolant'])
-    if materiel_dielectrique == 1:
-        femm.ei_setblockprop('FR4', 1, 0, 'None')
-    elif materiel_dielectrique == 2:
-        femm.ei_setblockprop('Polysterimide', 1, 0, 'None')
-    elif materiel_dielectrique == 3:
-        femm.ei_setblockprop('Teflon', 1, 0, 'None')
-    femm.ei_clearselected()
-
-    # materiau du bobinage du primaire
-    for j in range(no_couches_prim):
-        for i in range(no_spires_prim):
-            identifier = no_spires_prim * j + i
-            femm.ei_selectlabel(*etiquettes_dict['prim' + str(identifier)])
-            femm.ei_setblockprop('<No Mesh>', 1, 0, 'phase_prim')
-            femm.ei_clearselected()
-
-    # materiau du bobinage du secondaire
-    for j in range(no_couches_sec):
-        for i in range(no_spires_sec):
-            identifier = no_spires_sec * j + i
-            femm.ei_selectlabel(*etiquettes_dict['sec' + str(identifier)])
-            femm.ei_setblockprop('<No Mesh>', 1, 0, 'phase_sec')
-            femm.ei_clearselected()
-
-    # Enregistrement
+    # Save geometry file
     femm.ei_saveas('field_calculations.fee')
 
-    # Maillage
+    # Meshing and analysis
     # From manual: Note that it is not necessary to run mesh before performing
     # an analysis, as mi_analyze() will make sure the mesh is up to date before
     # running an analysis.
 
-    # Resolution
     # mi analyze(flag)
     # From manual: runs fkern to solve the problem. The flag parameter controls
     # whether the fkern window is visible or minimized. For a visible window,
@@ -977,7 +992,7 @@ def calc_field_distribution(transformer_geometry, voltage_high=1, view=None):
     # flag should be set to 1.
     femm.ei_analyze(1)
 
-    # Post-processeur
+    # Post-processor
     femm.ei_loadsolution()
 
     # eo_showdensityplot(legend,gscale,type,upper D,lower D)
@@ -989,7 +1004,8 @@ def calc_field_distribution(transformer_geometry, voltage_high=1, view=None):
     # the magnitude of D, and 2 plots the magnitude of E
     # upper D Sets the upper display limit for the density plot.
     # lower D Sets the lower display limit for the density plot.
-    femm.eo_showdensityplot(1, 0, 2, 50e6 * 20. / 19., 0)
+    if 'plot_field_max' in kwargs:
+        femm.eo_showdensityplot(1, 0, 2, kwargs['plot_field_max'] * 20 / 19, 0)
 
     # Save field lines along outer point of the PCB conductors. If the
     # conductors have trapezoidal shape, it is difficult to estimate where the
@@ -997,18 +1013,19 @@ def calc_field_distribution(transformer_geometry, voltage_high=1, view=None):
 #    if not edge_trapezoid:
 #        save_field_contour(ep_cuivre, etiquettes_dict, guard=guard)
     if view:
-        set_view(view, transformer_geometry.guard, etiquettes_dict)
+        set_view(view, tg.guard, etiquettes_dict)
 
-    # eo_getconductorproperties("conductor")Properties are returned for the
-    # conductor property named ”conductor”. Two values are returned: The
-    # voltage of the specified conductor, and the charge carried on the
-    # specified conductor.
+    # eo_getconductorproperties("conductor")
+    # From manual: Properties are returned for the conductor property named
+    # ”conductor”. Two values are returned: The voltage of the specified
+    # conductor, and the charge carried on the specified conductor.
 
     # Calculate the capacitance
     circuit_properties = femm.eo_getconductorproperties('zero')
-    charge = -circuit_properties[1]
+    charge = -circuit_properties[1]  # get charge on secondary side conductors
+    capacitance = charge / voltage_high
 
-    # Commands for closing FEMM windows
-    # femm.eo_close()
-    # femm.ei_close()
-    return charge
+    if kwargs.get('close') is True:
+        femm.closefemm()
+
+    return capacitance
