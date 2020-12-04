@@ -170,6 +170,8 @@ class TransformerGeometry(object):
         with the expected format of the methods that use this class.'''
         if not isinstance(self.width_between_tracks, (list, tuple)):
             self.width_between_tracks = [self.width_between_tracks, ] * 2
+        if not isinstance(self.width_copper, (list, tuple)):
+            self.width_between_tracks = [self.width_copper, ] * 2
         if not isinstance(self.radius_inner_track, (list, tuple)):
             self.radius_inner_track = [self.radius_inner_track, ] * 2
         if self.radius_pcb is None:

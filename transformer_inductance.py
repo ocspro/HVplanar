@@ -186,9 +186,9 @@ def add_conductors(g, label_dict):
         for i in range(g.turns_primary):
             coords_conductor = coords_of_rectangle(g.radius_inner_track[0] +
                                                    (g.width_between_tracks[0] +
-                                                    g.width_copper) * i,
+                                                    g.width_copper[0]) * i,
                                                    z_copper[0][c],
-                                                   g.width_copper,
+                                                   g.width_copper[0],
                                                    g.height_copper)
             draw_conductor(coords_conductor,
                            1,
@@ -199,9 +199,9 @@ def add_conductors(g, label_dict):
         for i in range(g.turns_secondary):
             coords_conductor = coords_of_rectangle(g.radius_inner_track[1] +
                                                    (g.width_between_tracks[1] +
-                                                    g.width_copper) * i,
+                                                    g.width_copper[1]) * i,
                                                    z_copper[1][c],
-                                                   g.width_copper,
+                                                   g.width_copper[1],
                                                    -g.height_copper)
             draw_conductor(coords_conductor,
                            0,

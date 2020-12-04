@@ -68,7 +68,6 @@ def initial_setup(limite_externe, voltage_high, **kwargs):
     femm.ei_addmaterial('teflon', 2.1, 2.1, 0)
     femm.ei_addmaterial('silgel', 2.7, 2.7, 0)
     femm.ei_addmaterial('midel', 3.15, 3.15, 0)
-    femm.ei_addmaterial('epoxy', 10, 10, 0)
     if 'material' in kwargs:
         for m in kwargs['material']:
             femm.ei_addmaterial(*m)
@@ -177,9 +176,9 @@ def add_conductors(tg, label_dict):
         for i in range(tg.turns_primary):
             coords_conductor = coords_rectangle(tg.radius_inner_track[0] +
                                                 (tg.width_between_tracks[0] +
-                                                 tg.width_copper) * i,
+                                                 tg.width_copper[0]) * i,
                                                 z_copper[0][c],
-                                                tg.width_copper,
+                                                tg.width_copper[0],
                                                 tg.height_copper)
             draw_conductor(coords_conductor,
                            1,
@@ -190,9 +189,9 @@ def add_conductors(tg, label_dict):
         for i in range(tg.turns_secondary):
             coords_conductor = coords_rectangle(tg.radius_inner_track[1] +
                                                 (tg.width_between_tracks[1] +
-                                                 tg.width_copper) * i,
+                                                 tg.width_copper[1]) * i,
                                                 z_copper[1][c],
-                                                tg.width_copper,
+                                                tg.width_copper[1],
                                                 -tg.height_copper)
             draw_conductor(coords_conductor,
                            0,
@@ -351,15 +350,19 @@ def round_conductor_edges(tg, label_dict, segment_angle):
     # Find primary side corners and add new labels for the rounded edge
     turns = tg.turns_primary
     label_dict['edge0'] = (np.array(label_dict['prim0']) +
-                           np.array((-conductor_width, -conductor_height))/2.0)
+                           np.array((-conductor_width[0],
+                                     -conductor_height))/2.0)
     label_dict['edge1'] = (np.array(label_dict['prim' + str(turns - 1)]) +
-                           np.array((conductor_width, -conductor_height))/2.0)
+                           np.array((conductor_width[0],
+                                     -conductor_height))/2.0)
     # Find secondary side corners and add new labels for the rounded edge
     turns = tg.turns_secondary
     label_dict['edge2'] = (np.array(label_dict['sec0']) +
-                           np.array((-conductor_width, conductor_height))/2.0)
+                           np.array((-conductor_width[1],
+                                     conductor_height))/2.0)
     label_dict['edge3'] = (np.array(label_dict['sec' + str(turns - 1)]) +
-                           np.array((conductor_width, conductor_height))/2.0)
+                           np.array((conductor_width[1],
+                                     conductor_height))/2.0)
     # Round edges and set arcsegment properties
     for e in ['edge0', 'edge1']:
         corner = label_dict[e]
@@ -391,9 +394,11 @@ def modify_tracks(tg, label_dict, segment_angle):
         if track.side_v == 'high':
             label_v = 'prim'
             turns_tot = tg.turns_primary
+            cu_width = tg.width_copper[0]
         else:
             label_v = 'sec'
             turns_tot = tg.turns_secondary
+            cu_width = tg.width_copper[1]
         if track.track in ['outer', 'inner']:
             if track.track == 'outer':
                 track_no = turns_tot - 1 + turns_tot * track.layer
@@ -401,9 +406,9 @@ def modify_tracks(tg, label_dict, segment_angle):
                 track_no = turns_tot * track.layer
         coords = np.array(label_dict[label_v + str(track_no)])
         if track.side_h == 'outer':
-            coords = coords + np.array((tg.width_copper / 2.0, 0))
+            coords = coords + np.array((cu_width / 2.0, 0))
         else:
-            coords = coords + np.array((-tg.width_copper / 2.0, 0))
+            coords = coords + np.array((-cu_width / 2.0, 0))
         if track.elongation is not None:
             coords = _modify_tracks_elongate(tg, track, coords)
         _modify_tracks_round(tg, track, coords, segment_angle)
@@ -705,13 +710,13 @@ def draw_guard_trench(tg, trench, label_name, label_dict):
     # find starting point
     if trench.polarity:
         node0 = (np.array(label_dict['prim' + str(turns - 1)]) +
-                 np.array((conductor_width*sign, conductor_height))/2.0 +
+                 np.array((conductor_width[0]*sign, conductor_height))/2.0 +
                  np.array((trench.distance * sign, 0)))
         in_conductor = 'high'
         pm = 1  # polarity multiplier
     else:
         node0 = (np.array(label_dict['sec' + str(turns - 1)]) +
-                 np.array((conductor_width*sign, -conductor_height))/2.0 +
+                 np.array((conductor_width[1]*sign, -conductor_height))/2.0 +
                  np.array((trench.distance * sign, 0)))
         in_conductor = 'zero'
         pm = -1  # polarity multiplier
