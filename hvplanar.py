@@ -143,7 +143,8 @@ class TransformerGeometry(object):
                  height_pcb_prepreg=0, height_dielectric=1,
                  height_copper=0.035, height_gap=0.01, height_gel=5,
                  radius_pcb=None, radius_gel=None, radius_dielectric=None,
-                 material_dielectric='fr4', tracks=None, guard=None):
+                 radius_corner=None, material_dielectric='fr4', tracks=None,
+                 guard=None):
         self.turns_primary = turns_primary
         self.layers_primary = layers_primary
         self.turns_secondary = turns_secondary
@@ -160,8 +161,11 @@ class TransformerGeometry(object):
         self.radius_pcb = radius_pcb
         self.radius_dielectric = radius_dielectric
         self.radius_gel = radius_gel
+        if not radius_corner:
+            self.radius_corner = 0.2 * height_copper
+        else:
+            self.radius_corner = radius_corner
         self.material_dielectric = material_dielectric
-        # self.edge_type = edge_type
         self.tracks = tracks
         self.guard = guard
 
@@ -171,7 +175,7 @@ class TransformerGeometry(object):
         if not isinstance(self.width_between_tracks, (list, tuple)):
             self.width_between_tracks = [self.width_between_tracks, ] * 2
         if not isinstance(self.width_copper, (list, tuple)):
-            self.width_between_tracks = [self.width_copper, ] * 2
+            self.width_copper = [self.width_copper, ] * 2
         if not isinstance(self.radius_inner_track, (list, tuple)):
             self.radius_inner_track = [self.radius_inner_track, ] * 2
         if self.radius_pcb is None:
@@ -184,22 +188,57 @@ class TransformerGeometry(object):
         if self.radius_gel is None:
             self.radius_gel = self.radius_dielectric + 2
 
+        # add rounding of the four corners closest to the insulation material
+        # if no FancyTrack specification is set by the user
+        corners = [(0, 0, 0), ]
+        if self.turns_primary > 1:
+            corners.append((0, self.turns_primary-1, 0))
+        corners.append((0, 0, 1))
+        if self.turns_secondary > 1:
+            corners.append((0, self.turns_secondary-1, 1))
+        corners.reverse()
+        if self.tracks is None:
+            self.tracks = []
+        else:
+            for t in self.tracks:
+                if (t.layer, t.turn, t.polarity) in corners:
+                    corners.remove((t.layer, t.turn, t.polarity))
+
+        self.tracks.reverse()
+        for c in corners:
+            if c == (0, 0, 0) and self.turns_primary == 1:
+                side_h = 'both'
+            elif c == (0, 0, 1) and self.turns_secondary == 1:
+                side_h = 'both'
+            elif c == (0, 0, 0) or c == (0, 0, 1):
+                side_h = 'inner'
+            elif c[1] > 0:
+                side_h = 'outer'
+            t = FancyTrack(c[0], c[1], c[2], side_h, 'towards', True)
+            self.tracks.append(t)
+        self.tracks.reverse()
+
 
 class FancyTrack(object):
     '''Additional manipulation of individual tracks in the winding
-    structure.'''
-    def __init__(self, layer, track, side_h, side_v='high', rounding='single',
-                 elongation=None):
-        self.layer = layer
-        self.track = track
-        self.side_h = side_h
-        self.side_v = side_v
-        self.rounding = rounding
-        self.elongation = elongation
+    structure. Identification of the turn is done by layer number [0-n],
+    turn number [0-m], and polarity [0-1]. Rounding of which of the four
+    corners are indicated by side_horisontal, side_vertical. Elongation of the
+    track width is done by elongation length [>0mm] and side_h.
+    '''
+    def __init__(self, layer, turn, polarity, side_h, side_v='towards',
+                 rounding=False, elongation=0):
+        self.layer = layer              # layer number >= 0
+        self.turn = turn           		# turn number >= 0
+        self.polarity = polarity        # primary or secondary side (0/1)
+        self.side_h = side_h            # horisontal side; inner/outer/both
+        self.side_v = side_v            # vertical side; towards/away/both
+        self.rounding = rounding        # True or False
+        self.elongation = elongation    # elongation length in mm
 
     def __str__(self):
-        return ('FancyTrack on {} side, layer {}, track {} with {} rounding.'
-                .format(self.side_v, self.layer, self.track, self.rounding))
+        return ('FancyTrack on {} side, layer {}, turn {} with rounding = {} .'
+                .format(self.side_v, self.layer, self.turn, self.rounding))
 
     def __deepcopy__(self, memo):  # memo is a dict of id's to copies
         id_self = id(self)         # memoization avoids unnecesary recursion
@@ -207,7 +246,8 @@ class FancyTrack(object):
         if _copy is None:
             _copy = type(self)(
                 deepcopy(self.layer, memo),
-                deepcopy(self.track, memo),
+                deepcopy(self.turn, memo),
+                deepcopy(self.polarity, memo),
                 deepcopy(self.side_h, memo),
                 deepcopy(self.side_v, memo),
                 deepcopy(self.rounding, memo),
@@ -216,12 +256,13 @@ class FancyTrack(object):
         return _copy
 
     def mirror(self):
-        'Returns a new object with the opposite side than self.'''
+        '''Returns a new object with the opposite polarity than self, thus
+        mirroring the geometry over the insulation layer.'''
         _copy = deepcopy(self)
-        if _copy.side_h == 'high':
-            _copy.side_h == 'low'
+        if _copy.polarity:
+            _copy.polarity = 0
         else:
-            _copy.side_h = 'high'
+            _copy.polarity = 1
         return _copy
 
 

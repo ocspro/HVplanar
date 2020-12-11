@@ -300,7 +300,7 @@ def add_block_labels(tg, label_dict):
     # label for the isolation disc
     coords = [2, tg.height_dielectric / 2.]
     femm.ei_addblocklabel(*coords)
-    label_dict['isolant'] = coords
+    label_dict['insulation'] = coords
 
     # Set material type for all blocks
     # ei setblockprop("blockname", automesh, meshsize, group) Set the selected
@@ -323,285 +323,121 @@ def add_block_labels(tg, label_dict):
     femm.ei_setblockprop('midel', 1, 0, 'None')
     femm.ei_clearselected()
 
-    femm.ei_selectlabel(*label_dict['isolant'])
+    femm.ei_selectlabel(*label_dict['insulation'])
     femm.ei_setblockprop(tg.material_dielectric.lower(), 1, 0, 'None')
     femm.ei_clearselected()
 
 
-def round_conductor_edges(tg, label_dict, segment_angle):
-    '''Round the edges of conductors that are critical to the peak field
-    calculations. These conductors will be the ones closest to the dielectric
-    material, and both inner and outer conductor corners
-
-    Args:
-        tg (:obj:'TransformerGeometry'): contains all geometry information
-        needed to build conductors in the problem.
-        label_dict (dict): stores coordinates
-    '''
-
-    # Define parameters of the rounding
-    conductor_height = tg.height_copper
-    conductor_width = tg.width_copper
-    corner_radius = .2 * conductor_height  # percentage of conductor height
-    segment_length = 0.004
-    if segment_angle is None:
-        segment_angle = 1
-
-    # Find primary side corners and add new labels for the rounded edge
-    turns = tg.turns_primary
-    label_dict['edge0'] = (np.array(label_dict['prim0']) +
-                           np.array((-conductor_width[0],
-                                     -conductor_height))/2.0)
-    label_dict['edge1'] = (np.array(label_dict['prim' + str(turns - 1)]) +
-                           np.array((conductor_width[0],
-                                     -conductor_height))/2.0)
-    # Find secondary side corners and add new labels for the rounded edge
-    turns = tg.turns_secondary
-    label_dict['edge2'] = (np.array(label_dict['sec0']) +
-                           np.array((-conductor_width[1],
-                                     conductor_height))/2.0)
-    label_dict['edge3'] = (np.array(label_dict['sec' + str(turns - 1)]) +
-                           np.array((conductor_width[1],
-                                     conductor_height))/2.0)
-    # Round edges and set arcsegment properties
-    for e in ['edge0', 'edge1']:
-        corner = label_dict[e]
-        femm.ei_createradius(corner[0], corner[1], corner_radius)
-        femm.ei_selectarcsegment(*corner)
-        femm.ei_setarcsegmentprop(segment_angle, '<None>', 0, 0, 'high')
-        femm.ei_clearselected()
-    for e in ['edge2', 'edge3']:
-        corner = label_dict[e]
-        femm.ei_createradius(corner[0], corner[1], corner_radius)
-        femm.ei_selectarcsegment(*corner)
-        femm.ei_setarcsegmentprop(segment_angle, '<None>', 0, 0, 'zero')
-        femm.ei_clearselected()
-    increase_pcb_mesh(conductor_height, conductor_height*2, segment_length,
-                      label_dict)
-
-
-def modify_tracks(tg, label_dict, segment_angle):
-    '''Modify tracks as specified by the user using the FancyTrack class.
+def modify_tracks(tg, label_dict, segment_angle=1, segment_length=0.004):
+    '''Modify tracks according to the FancyTrack class. This includes rounding
+    of corners and elongation of individual tracks.
 
     Args:
         tg (:obj:'TransformerGeometry'): contains all geometry information
         needed to build conductors in the problem.
         label_dict (dict): stores label coordinates
     '''
-    if segment_angle is None:
-        segment_angle = 1
     for track in tg.tracks:
-        if track.side_v == 'high':
-            label_v = 'prim'
-            turns_tot = tg.turns_primary
-            cu_width = tg.width_copper[0]
-        else:
-            label_v = 'sec'
-            turns_tot = tg.turns_secondary
-            cu_width = tg.width_copper[1]
-        if track.track in ['outer', 'inner']:
-            if track.track == 'outer':
-                track_no = turns_tot - 1 + turns_tot * track.layer
-            else:
-                track_no = turns_tot * track.layer
-        coords = np.array(label_dict[label_v + str(track_no)])
-        if track.side_h == 'outer':
-            coords = coords + np.array((cu_width / 2.0, 0))
-        else:
-            coords = coords + np.array((-cu_width / 2.0, 0))
-        if track.elongation is not None:
-            coords = _modify_tracks_elongate(tg, track, coords)
-        _modify_tracks_round(tg, track, coords, segment_angle)
+        coords, vectors, labels = _get_corner_coord(track, tg, label_dict)
+        if track.elongation != 0:
+            _modify_tracks_elongate(tg, track, label_dict)
+        if track.rounding:
+            _modify_tracks_round(track, coords, tg.radius_corner,
+                                 segment_angle)
+
+    _increase_pcb_mesh(tg, 3*tg.height_copper, segment_length, label_dict)
 
 
-def _modify_tracks_round(tg, track, coords, segment_angle):
+def _modify_tracks_round(track, coords, radius, segment_angle):
     # Define parameters of the rounding
-    corner_radius = .2 * tg.height_copper  # percentage of conductor height
-
-    if track.side_v == 'high':
-        delta_vert = -tg.height_copper / 2.0
+    if track.polarity == 0:
         volt_potential = 'high'
     else:
-        delta_vert = tg.height_copper / 2.0
         volt_potential = 'zero'
-    if track.rounding in ['single', 'both']:
-        corner = coords + np.array((0, delta_vert))
-        femm.ei_createradius(corner[0], corner[1], corner_radius)
-        femm.ei_selectarcsegment(*corner)
+    for c in coords:
+        femm.ei_createradius(c[0], c[1], radius)
+        femm.ei_selectarcsegment(*c)
         femm.ei_setarcsegmentprop(segment_angle, '<None>', 0, 0,
                                   volt_potential)
-    if track.rounding == 'both':
-        corner = coords - np.array((0, delta_vert))
-        femm.ei_createradius(corner[0], corner[1], corner_radius)
-        femm.ei_selectarcsegment(*corner)
-        femm.ei_setarcsegmentprop(segment_angle, '<None>', 0, 0,
-                                  volt_potential)
+        femm.ei_clearselected()
 
 
-def _modify_tracks_elongate(tg, track, coords):
-    femm.ei_selectsegment(*coords)
-    femm.ei_movetranslate2(track.elongation, 0, 1)
-    femm.ei_clearselected()
-    return coords + np.array((track.elongation, 0))
+def _modify_tracks_elongate(tg, track, label_dict):
+    ''' '''
+    if not track.polarity:
+        label = 'prim'
+        turns_tot = tg.turns_primary
+        cu_width = tg.width_copper[0]
+    else:
+        label = 'sec'
+        turns_tot = tg.turns_secondary
+        cu_width = tg.width_copper[1]
+    label = label + str(track.layer * turns_tot + track.turn)
+    coords = label_dict[label]
+
+    # elongate inner and/or outer line segment.
+    if track.side_h in ['inner', 'both']:
+        coords_inner = coords + np.array([-cu_width / 2, 0])
+        femm.ei_selectsegment(*coords_inner)
+        femm.ei_movetranslate2(-track.elongation, 0, 1)
+        femm.ei_clearselected()
+
+    if track.side_h in ['outer', 'both']:
+        coords_outer = coords + np.array([cu_width / 2, 0])
+        femm.ei_selectsegment(*coords_outer)
+        femm.ei_movetranslate2(track.elongation, 0, 1)
+        femm.ei_clearselected()
 
 
-def trapezoidal_conductor_edges(tg, label_dict):
-    '''Make the edges of conductors trapezoidal for those that are critical to
-    the peak field calculations. These conductors will be the ones closest to
-    the dielectric material, and both inner and outer conductor corners.
-
-    Args:
-        tg (:obj:'TransformerGeometry'): contains all geometry information
-        needed to build conductors in the problem.
-        label_dict (dict): stores label coordinates
-    '''
-    # Define parameters of the rounding
-    turns = tg.turns_primary
-    conductor_height = tg.height_copper
-    conductor_width = tg.width_copper
-    cut_in_length = 2 * conductor_height  # percentage of conductor height
-    corner_radius = 1.7 * conductor_height
-    ledge_height = 0.005
-    ledge_radius = 0.004
-    segment_length = 0.004
-    angle_max = 1
-
-    # Make trapezaoidal corners on primary side corners and add new labels for
-    # the new points. Sequence: -> find corner to be moved -> set segment props
-    # -> make ledge -> move corner to make trapezoid -> add nodes for edge and
-    # edge corner -> repeat for all corners -> set all segment props -> round
-    # all edges -> set all arcsegment props -> set segment props along pcb for
-    # all trapezoidal conductor edges.
-
-    # Primary inner corner
-    inner_corner = (np.array(label_dict['prim0']) +
-                    np.array((-conductor_width/2., -conductor_height/2.)))
-    femm.ei_selectsegment(*(inner_corner + np.array((0, conductor_height/2.))))
-    femm.ei_setsegmentprop('<None>', segment_length, 0, 0, 0, 'high')
-    label_dict['ledge0corner'] = (inner_corner +
-                                  np.array((0, conductor_height-ledge_height)))
-    femm.ei_addnode(*label_dict['ledge0corner'])
-    femm.ei_selectnode(*inner_corner)
-    femm.ei_movetranslate(cut_in_length, 0)
-    label_dict['edge0'] = (np.array(label_dict['prim0']) +
-                           np.array(((-conductor_width+cut_in_length)/2., 0)))
-    label_dict['edge0corner'] = inner_corner + np.array((cut_in_length, 0))
-    # Primary outer corner
-    outer_corner = (np.array(label_dict['prim' + str(turns - 1)]) +
-                    np.array((conductor_width/2., -conductor_height/2.)))
-    femm.ei_selectsegment(*(outer_corner + np.array((0, conductor_height/2.))))
-    femm.ei_setsegmentprop('<None>', segment_length, 0, 0, 0, 'high')
-    label_dict['ledge1corner'] = (outer_corner +
-                                  np.array((0, conductor_height-ledge_height)))
-    femm.ei_addnode(*label_dict['ledge1corner'])
-    femm.ei_selectnode(*outer_corner)
-    femm.ei_movetranslate(-cut_in_length, 0)
-    label_dict['edge1'] = (np.array(label_dict['prim' + str(turns - 1)]) +
-                           np.array(((conductor_width-cut_in_length)/2., 0)))
-    label_dict['edge1corner'] = outer_corner + np.array((-cut_in_length, 0))
-
-    # Secondary inner corner
-    turns = tg.turns_secondary
-    inner_corner = (np.array(label_dict['sec0']) +
-                    np.array((-conductor_width/2., conductor_height/2.)))
-    femm.ei_selectsegment(*(inner_corner +
-                            np.array((0, -conductor_height/2.))))
-    femm.ei_setsegmentprop('<None>', segment_length, 0, 0, 0, 'zero')
-    label_dict['ledge2corner'] = (inner_corner +
-                                  np.array((0, ledge_height-conductor_height)))
-    femm.ei_addnode(*label_dict['ledge2corner'])
-    femm.ei_selectnode(*inner_corner)
-    femm.ei_movetranslate(cut_in_length, 0)
-    label_dict['edge2'] = (np.array(label_dict['sec0']) +
-                           np.array(((-conductor_width+cut_in_length)/2., 0)))
-    label_dict['edge2corner'] = inner_corner + np.array((cut_in_length, 0))
-    # Secondary outer corner
-    outer_corner = (np.array(label_dict['sec' + str(turns - 1)]) +
-                    np.array((conductor_width/2., conductor_height/2.)))
-    femm.ei_selectsegment(*(outer_corner +
-                            np.array((0, -conductor_height/2.))))
-    femm.ei_setsegmentprop('<None>', segment_length, 0, 0, 0, 'zero')
-    label_dict['ledge3corner'] = (outer_corner +
-                                  np.array((0, ledge_height-conductor_height)))
-    femm.ei_addnode(*label_dict['ledge3corner'])
-    femm.ei_selectnode(*outer_corner)
-    femm.ei_movetranslate(-cut_in_length, 0)
-    label_dict['edge3'] = (np.array(label_dict['sec' + str(turns - 1)]) +
-                           np.array(((conductor_width-cut_in_length)/2., 0)))
-    label_dict['edge3corner'] = outer_corner + np.array((-cut_in_length, 0))
-
-    # Set segment size for diagonal line to decrease mesh sizing
-    femm.ei_selectsegment(*label_dict['edge0'])
-    femm.ei_selectsegment(*label_dict['edge1'])
-    femm.ei_setsegmentprop('<None>', segment_length, 0, 0, 0, 'high')
-    femm.ei_clearselected()
-    femm.ei_selectsegment(*label_dict['edge2'])
-    femm.ei_selectsegment(*label_dict['edge3'])
-    femm.ei_setsegmentprop('<None>', segment_length, 0, 0, 0, 'zero')
-    femm.ei_clearselected()
-
-    # Round new edge on primary and secondary and set arcangle
-    for idx in range(4):
-        node = label_dict['edge' + str(idx) + 'corner']
-        femm.ei_createradius(node[0], node[1], corner_radius)
-        node = label_dict['ledge' + str(idx) + 'corner']
-        femm.ei_createradius(node[0], node[1], ledge_radius)
-    # Set arcsegment properties
-    segments = [str(x) + str(y) + 'corner' for x in ['edge', 'ledge']
-                for y in range(2)]
-    for s in segments:
-        femm.ei_selectarcsegment(*label_dict[s])
-    femm.ei_setarcsegmentprop(angle_max, '<None>', 0, 0, 'high')
-    femm.ei_clearselected()
-
-    segments = [str(x) + str(y) + 'corner' for x in ['edge', 'ledge']
-                for y in range(2, 4)]
-    for s in segments:
-        femm.ei_selectarcsegment(*label_dict[s])
-    femm.ei_setarcsegmentprop(angle_max, '<None>', 0, 0, 'zero')
-    femm.ei_clearselected()
-
-    # Set segment size to decrease mesh size along edge of PCB where the field
-    # is high
-    increase_pcb_mesh(cut_in_length, conductor_height, segment_length,
-                      label_dict)
-
-
-def increase_pcb_mesh(cut_in, dz, segment_length, label_dict):
-    '''Decrease segment size to increase mesh along edge of PCB where the
-    field is high.
+def _increase_pcb_mesh(tg, cut_in, segment_length, label_dict):
+    '''Decrease segment size to increase mesh along edge of the innermost PCB
+    edge where the field is high.
 
     Args:
         cut_in (float): how far along the pcb edge from the conductor where the
-        segment length is decreased
+        segment length is set
         dz (float): copper height of conductors
         segment_length (float): specifiy segment length in femm
         label_dict (dict): stores label coordinates
     '''
-
+    # Define parameters of the rounding
+    cu_height = tg.height_copper
+    cu_width = tg.width_copper
+    segment_length = 0.004
     pcb_segment = []
     pcb_node = []
-    pcb_node.append((np.array(label_dict['edge0']) +
-                    np.array((-cut_in*1.5, dz/2.))))
-    pcb_segment.append(pcb_node[-1] + np.array((cut_in/2., 0)))
-    pcb_node.append((np.array(label_dict['edge1']) +
-                    np.array((cut_in*1.5, dz/2.))))
-    pcb_segment.append(pcb_node[-1] + np.array((-cut_in/2., 0)))
-    pcb_node.append((np.array(label_dict['edge2']) +
-                    np.array((-cut_in*1.5, -dz/2.))))
-    pcb_segment.append(pcb_node[-1] + np.array((cut_in/2., 0)))
-    pcb_node.append((np.array(label_dict['edge3']) +
-                    np.array((cut_in*1.5, -dz/2.))))
-    pcb_segment.append(pcb_node[-1] + np.array((-cut_in/2., 0)))
+
+    # Find primary side corners and add new labels for the rounded edge
+    edge0 = (np.array(label_dict['prim0']) +
+             np.array((-cu_width[0],
+                       cu_height)) / 2.0)
+    edge1 = (np.array(label_dict['prim' + str(tg.turns_primary - 1)]) +
+             np.array((cu_width[0],
+                       cu_height)) / 2.0)
+    # Find secondary side corners and add new labels for the rounded edge
+    edge2 = (np.array(label_dict['sec0']) +
+             np.array((-cu_width[1],
+                       -cu_height)) / 2.0)
+    edge3 = (np.array(label_dict['sec' + str(tg.turns_secondary - 1)]) +
+             np.array((cu_width[1],
+                       -cu_height)) / 2.0)
+
+    pcb_node.append(edge0 + np.array((-cut_in, 0)))
+    pcb_segment.append(pcb_node[-1] + np.array((cut_in / 2, 0)))
+    pcb_node.append(edge1 + np.array((cut_in, 0)))
+    pcb_segment.append(pcb_node[-1] + np.array((-cut_in / 2, 0)))
+    pcb_node.append(edge2 + np.array((-cut_in, 0)))
+    pcb_segment.append(pcb_node[-1] + np.array((cut_in / 2, 0)))
+    pcb_node.append(edge3 + np.array((cut_in, 0)))
+    pcb_segment.append(pcb_node[-1] + np.array((-cut_in / 2, 0)))
 
     for idx, node in enumerate(pcb_node):
         femm.ei_addnode(*node)
-        label_dict['edge' + str(idx) + 'pcb'] = node
 
     for segment in pcb_segment:
         femm.ei_selectsegment(*segment)
-    femm.ei_setsegmentprop('<None>', segment_length, 0, 0, 0, '<None>')
-    femm.ei_clearselected()
+        femm.ei_setsegmentprop('<None>', segment_length, 0, 0, 0, '<None>')
+        femm.ei_clearselected()
 
 
 def add_guard(geometry, guard, label_dict):
@@ -813,7 +649,99 @@ def draw_field_contour(coords_start, coords_end, filename=None):
         femm.eo_makeplot(4, 5000)
 
 
-def skip_last(iterator):
+def get_peak_field(tg, label_dict, segment_angle=1, distance=None):
+    ''' Get value of electric field for all rounded corners that are given as
+    fancy tracks of the geometry. The field value is ziped toghether with a
+    text label that indicates which corner.'''
+    e_field = []
+
+    for t in tg.tracks:
+        if t.rounding:
+            coords, vectors, labels = _get_corner_coord(t, tg, label_dict)
+            for c, v, l in zip(coords, vectors, labels):
+                e_field.append((l, _get_peak_field(c, v, tg.radius_corner,
+                                                   segment_angle, distance)))
+    return e_field
+
+
+def _get_peak_field(coord, vector, radius, segment_angle, distance):
+    ''' Get the E-field value a given distance away from a rounded corner. If
+    no distance is given, the distance is set to be 5 times the mesh size of
+    the arc segment that makes up the corner.'''
+    if distance is None:
+        distance = 5*pi*radius*segment_angle/180
+    coord_shift = np.array([-np.sqrt(2)/2 * (radius + distance)]*2) + radius
+    coord_point = coord - vector * coord_shift
+    x = femm.eo_getpointvalues(*coord_point)
+    return np.sqrt(x[3]**2 + x[4]**2)
+
+
+def _get_corner_coord(track, tg, label_dict):
+    coord_corner = []
+    vector_corner = []
+    label_corner = []
+
+    if track.rounding is not None:
+        if not track.polarity:
+            label = 'prim'
+            turns_tot = tg.turns_primary
+            cu_width = tg.width_copper[0]
+        else:
+            label = 'sec'
+            turns_tot = tg.turns_secondary
+            cu_width = tg.width_copper[1]
+        label = label + str(track.layer * turns_tot + track.turn)
+        coord = label_dict[label]
+        cu_height = tg.height_copper
+        elongation = track.elongation
+
+        # side
+        if track.side_h in ['inner', 'both']:
+            vector_h = -1
+            label_base = label + '_inner'
+            if track.side_v in ['towards', 'both']:
+                vector_v = -1 + 2 * track.polarity
+                vector = np.array([vector_h, vector_v])
+
+                x = np.array((cu_width / 2.0 * vector[0] - elongation,
+                              cu_height / 2.0 * vector[1]))
+                coord_corner.append(coord + x)
+                vector_corner.append(vector)
+                label_corner.append(label_base + '_towards')
+            if track.side_v in ['away', 'both']:
+                vector_v = 1 - 2 * track.polarity
+                vector = np.array([vector_h, vector_v])
+
+                x = np.array((cu_width / 2.0 * vector[0] - elongation,
+                              cu_height / 2.0 * vector[1]))
+                coord_corner.append(coord + x)
+                vector_corner.append(vector)
+                label_corner.append(label_base + '_away')
+        if track.side_h in ['outer', 'both']:
+            label_base = label + '_outer'
+            vector_h = 1
+            if track.side_v in ['towards', 'both']:
+                vector_v = -1 + 2 * track.polarity
+                vector = np.array([vector_h, vector_v])
+
+                x = np.array((cu_width / 2.0 * vector[0] + elongation,
+                              cu_height / 2.0 * vector[1]))
+                coord_corner.append(coord + x)
+                vector_corner.append(vector)
+                label_corner.append(label_base + '_towards')
+            if track.side_v in ['away', 'both']:
+                vector_v = 1 - 2 * track.polarity
+                vector = np.array([vector_h, vector_v])
+
+                x = np.array((cu_width / 2.0 * vector[0] + elongation,
+                              cu_height / 2.0 * vector[1]))
+                coord_corner.append(coord + x)
+                vector_corner.append(vector)
+                label_corner.append(label_base + '_away')
+    return [coord_corner, vector_corner, label_corner]
+
+
+def _skip_last(iterator):
     '''Generator that skips the last entry. Used when reading output from
     contour plots as the final line of the output file is empty.'''
     prev = next(iterator)
@@ -829,7 +757,7 @@ def read_field_contour_file(filename):
         unit_xaxis = f.readline()
         unit_yaxis = f.readline()
         data = []
-        for row in skip_last(f):
+        for row in _skip_last(f):
             a, b, c = row.split('\t')
             data.append([float(a), float(b)])
         return unit_xaxis, unit_yaxis, list(zip(*data))
@@ -959,6 +887,10 @@ def calc_field_distribution(tg, voltage_high=1, view=None, **kwargs):
     # initialitiation of the electro-static problem
     boundary_radius = 2 * tg.radius_dielectric
     initial_setup(boundary_radius, voltage_high, **kwargs)
+    if 'segment_angle' in kwargs:
+        segment_angle = kwargs('segment_angle')
+    else:
+        segment_angle = 1
 
     # draw conductors on primary and secondary sides
     add_conductors(tg, etiquettes_dict)
@@ -966,14 +898,7 @@ def calc_field_distribution(tg, voltage_high=1, view=None, **kwargs):
     add_isolation(tg)
     add_block_labels(tg, etiquettes_dict)
 
-    round_conductor_edges(tg, etiquettes_dict, kwargs.get('segment_angle'))
-
-#    if tg.edge_type == 'Round':
-#        round_conductor_edges(tg, etiquettes_dict)
-#    elif tg.edge_type == 'Trapezoidal':
-#        trapezoidal_conductor_edges(tg, etiquettes_dict)
-    if tg.tracks:
-        modify_tracks(tg, etiquettes_dict, kwargs.get('segment_angle'))
+    modify_tracks(tg, etiquettes_dict, segment_angle)
 
     if tg.guard:
         add_guard(tg, tg.guard, etiquettes_dict)
@@ -1000,26 +925,6 @@ def calc_field_distribution(tg, voltage_high=1, view=None, **kwargs):
     # Post-processor
     femm.ei_loadsolution()
 
-    # eo_showdensityplot(legend,gscale,type,upper D,lower D)
-    # From manual: Shows the flux density plot with options:
-    # legend Set to 0 to hide the plot legend or 1 to show the plot legend.
-    # gscale Set to 0 for a colour density plot or 1 for a grey scale density
-    # plot.
-    # type Sets the type of density plot. A value of 0 plots voltage, 1 plots
-    # the magnitude of D, and 2 plots the magnitude of E
-    # upper D Sets the upper display limit for the density plot.
-    # lower D Sets the lower display limit for the density plot.
-    if 'plot_field_max' in kwargs:
-        femm.eo_showdensityplot(1, 0, 2, kwargs['plot_field_max'] * 20 / 19, 0)
-
-    # Save field lines along outer point of the PCB conductors. If the
-    # conductors have trapezoidal shape, it is difficult to estimate where the
-    # peak field will be. Hence, the contour lines are not saved.
-#    if not edge_trapezoid:
-#        save_field_contour(ep_cuivre, etiquettes_dict, guard=guard)
-    if view:
-        set_view(view, tg.guard, etiquettes_dict)
-
     # eo_getconductorproperties("conductor")
     # From manual: Properties are returned for the conductor property named
     # ”conductor”. Two values are returned: The voltage of the specified
@@ -1030,7 +935,27 @@ def calc_field_distribution(tg, voltage_high=1, view=None, **kwargs):
     charge = -circuit_properties[1]  # get charge on secondary side conductors
     capacitance = charge / voltage_high
 
+    # eo_showdensityplot(legend,gscale,type,upper D,lower D)
+    # From manual: Shows the flux density plot with options:
+    # legend Set to 0 to hide the plot legend or 1 to show the plot legend.
+    # gscale Set to 0 for a colour density plot or 1 for a grey scale density
+    # plot.
+    # type Sets the type of density plot. A value of 0 plots voltage, 1 plots
+    # the magnitude of D, and 2 plots the magnitude of E
+    # upper D Sets the upper display limit for the density plot.
+    # lower D Sets the lower display limit for the density plot.
+    if 'plot_field_max' in kwargs:
+        femm.eo_refreshview()  # need to refresh before a change can be made
+        femm.eo_showdensityplot(1, 0, 2, kwargs['plot_field_max'] * 20 / 19, 0)
+
+    # Save field lines along outer point of the PCB conductors.
+    if view:
+        set_view(view, tg.guard, etiquettes_dict)
+
+    # Find high field values of corners
+    e_field_corners = get_peak_field(tg, etiquettes_dict)
+
     if kwargs.get('close') is True:
         femm.closefemm()
 
-    return capacitance
+    return capacitance, e_field_corners

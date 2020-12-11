@@ -340,6 +340,11 @@ def add_block_labels(tg, etiquettes_dict):
     femm.mi_clearselected()
 
 
+def add_magnetics(tg, etiquettes_dict):
+    ''' Add layers of magnetic material to the geometry.'''
+    pass
+
+
 def calc_inductance(tg, currents, inductances=(None, None), **kwargs):
     ''' Setup of magneto-static problem in femm to calculate inductance and
     resistance of planar transformer.
@@ -369,6 +374,7 @@ def calc_inductance(tg, currents, inductances=(None, None), **kwargs):
     add_pcbs(tg)
     add_isolation(tg)
     add_block_labels(tg, etiquettes_dict)
+    add_magnetics(tg, etiquettes_dict)
 
     # mi zoomnatural()
     # From manual: zooms to a “natural” view with sensible extents.
