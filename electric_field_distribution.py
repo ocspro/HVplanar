@@ -263,6 +263,34 @@ def add_isolation(tg):
     femm.ei_drawrectangle(*coords_gel)
 
 
+def add_magnetics(tg, label_dict):
+    ''' '''
+    # TODO: add function
+    for m in tg.magnetics:
+        # draw boxes
+        if not m.polarity:  # primary side
+            start_z = label_dict['prim' + str(tg.layers_primary*tg.turns_primary-1)][1] + m.distance # take copper into accoutns
+            coords = coords_rectangle(m.radius_inner, start_z, m.radius_outer - m.radius_inner, m.thickness)
+        else:   # secondary side
+            start_z = label_dict['sec' + str(tg.layers_secondary*tg.turns_secondary-1)][1] - m.distance # take copper into accoutns
+            coords = coords_rectangle(m.radius_inner, start_z, m.radius_outer - m.radius_inner, -m.thickness)
+        femm.ei_drawrectangle(*coords)
+
+        # add label
+        label_coord = (np.average((coords[0], coords[2])),
+                       np.average((coords[1], coords[3])))
+        femm.ei_addblocklabel(*label_coord)
+        femm.ei_selectlabel(*label_coord)
+        femm.ei_setblockprop(m.material, 1, 0, 'None')
+        femm.ei_clearselected()
+        # TODO add label to label dictionnary
+        # set boundary conditions
+        if m.polarity:
+            set_conductor_boundry(coords, 0)  # secondary
+        else:
+            set_conductor_boundry(coords, 1)  # primary
+
+
 def add_block_labels(tg, label_dict):
     '''Add block labels to pcbs, air, isolation disc, isolation gel/liquid.'''
     # Add block labels
@@ -338,10 +366,10 @@ def modify_tracks(tg, label_dict, segment_angle=1, segment_length=0.004):
         label_dict (dict): stores label coordinates
     '''
     for track in tg.tracks:
-        coords, vectors, labels = _get_corner_coord(track, tg, label_dict)
         if track.elongation != 0:
             _modify_tracks_elongate(tg, track, label_dict)
         if track.rounding:
+            coords, vectors, labels = _get_corner_coord(track, tg, label_dict)
             _modify_tracks_round(track, coords, tg.radius_corner,
                                  segment_angle)
 
@@ -394,6 +422,7 @@ def _increase_pcb_mesh(tg, cut_in, segment_length, label_dict):
     edge where the field is high.
 
     Args:
+        tg (:obj:'TransformerGeometry'): contains all geometry information
         cut_in (float): how far along the pcb edge from the conductor where the
         segment length is set
         dz (float): copper height of conductors
@@ -896,6 +925,7 @@ def calc_field_distribution(tg, voltage_high=1, view=None, **kwargs):
     add_conductors(tg, etiquettes_dict)
     add_pcbs(tg, etiquettes_dict)
     add_isolation(tg)
+    add_magnetics(tg, etiquettes_dict)
     add_block_labels(tg, etiquettes_dict)
 
     modify_tracks(tg, etiquettes_dict, segment_angle)

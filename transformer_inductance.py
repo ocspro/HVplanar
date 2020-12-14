@@ -263,6 +263,29 @@ def add_isolation(tg):
     femm.mi_drawrectangle(*coords_gel)
 
 
+def add_magnetics(tg, label_dict):
+    ''' '''
+    # TODO: add function
+    for m in tg.magnetics:
+        # draw boxes
+        if not m.polarity:  # primary side
+            start_z = label_dict['prim' + str(tg.layers_primary*tg.turns_primary-1)][1] + m.distance + tg.height_copper/2 # take copper into accoutns
+            coords = coords_of_rectangle(m.radius_inner, start_z, m.radius_outer - m.radius_inner, m.thickness)
+        else:   # secondary side
+            start_z = label_dict['sec' + str(tg.layers_secondary*tg.turns_secondary-1)][1] - m.distance - tg.height_copper/2 # take copper into accoutns
+            coords = coords_of_rectangle(m.radius_inner, start_z, m.radius_outer - m.radius_inner, -m.thickness)
+
+        # add label
+        femm.mi_drawrectangle(*coords)
+        label_coord = (average((coords[0], coords[2])),
+                       average((coords[1], coords[3])))
+        femm.mi_addblocklabel(*label_coord)
+        femm.mi_selectlabel(*label_coord)
+        femm.mi_setblockprop(m.material, 1, 0, '<None>', 0, 1, 0)
+        femm.mi_clearselected()
+        #add label to label dictionnary
+
+
 def add_block_labels(tg, etiquettes_dict):
     '''Add block labels to pcbs, air, isolation disc, isolation gel/liquid.'''
     # Add block labels
@@ -340,8 +363,13 @@ def add_block_labels(tg, etiquettes_dict):
     femm.mi_clearselected()
 
 
-def add_magnetics(tg, etiquettes_dict):
-    ''' Add layers of magnetic material to the geometry.'''
+def get_peak_field(tg, label_dict):
+    ''' Get peak B field for magnetics. Appears to happen along edge facing the
+    insulation material.'''
+    # TODO implement method
+    # femm.mo_getb(B_r, B_z).
+    # Check each point along a line for the maximum value
+    # Specficy a resoltion for number of points to check.
     pass
 
 
@@ -373,8 +401,9 @@ def calc_inductance(tg, currents, inductances=(None, None), **kwargs):
     add_conductors(tg, etiquettes_dict)
     add_pcbs(tg)
     add_isolation(tg)
+    if tg.magnetics is not None:
+        add_magnetics(tg, etiquettes_dict)
     add_block_labels(tg, etiquettes_dict)
-    add_magnetics(tg, etiquettes_dict)
 
     # mi zoomnatural()
     # From manual: zooms to a “natural” view with sensible extents.

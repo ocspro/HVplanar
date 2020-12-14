@@ -144,7 +144,7 @@ class TransformerGeometry(object):
                  height_copper=0.035, height_gap=0.01, height_gel=5,
                  radius_pcb=None, radius_gel=None, radius_dielectric=None,
                  radius_corner=None, material_dielectric='fr4', tracks=None,
-                 guard=None):
+                 magnetics=None, guard=None):
         self.turns_primary = turns_primary
         self.layers_primary = layers_primary
         self.turns_secondary = turns_secondary
@@ -167,6 +167,7 @@ class TransformerGeometry(object):
             self.radius_corner = radius_corner
         self.material_dielectric = material_dielectric
         self.tracks = tracks
+        self.magnetics = magnetics
         self.guard = guard
 
     def check_variables(self):
@@ -252,6 +253,45 @@ class FancyTrack(object):
                 deepcopy(self.side_v, memo),
                 deepcopy(self.rounding, memo),
                 deepcopy(self.elongation, memo))
+            memo[id_self] = _copy
+        return _copy
+
+    def mirror(self):
+        '''Returns a new object with the opposite polarity than self, thus
+        mirroring the geometry over the insulation layer.'''
+        _copy = deepcopy(self)
+        if _copy.polarity:
+            _copy.polarity = 0
+        else:
+            _copy.polarity = 1
+        return _copy
+
+
+class Magnetics(object):
+    ''' Geometry and material selection for layers of magnetic material used
+    in the transformer geometry.'''
+    def __init__(self, thickness, radius_outer, radius_inner=0, distance=1,
+                 material='air', polarity=0, max_b_field=None):
+        self.thickness = thickness
+        self.radius_outer = radius_outer
+        self.radius_inner = radius_inner
+        self.distance = distance
+        self.material = material
+        self.polarity = polarity
+        self.max_b_field = max_b_field
+
+    def __deepcopy__(self, memo):  # memo is a dict of id's to copies
+        id_self = id(self)         # memoization avoids unnecesary recursion
+        _copy = memo.get(id_self)
+        if _copy is None:
+            _copy = type(self)(
+                deepcopy(self.thickness, memo),
+                deepcopy(self.radius_outer, memo),
+                deepcopy(self.radius_inner, memo),
+                deepcopy(self.distance, memo),
+                deepcopy(self.material, memo),
+                deepcopy(self.polarity, memo),
+                deepcopy(self.max_b_field, memo))
             memo[id_self] = _copy
         return _copy
 
