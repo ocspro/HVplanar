@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-from numpy import average
+import numpy as np
 
 import femm
 
@@ -160,8 +160,8 @@ def draw_conductor(coords, in_conductor, label_name, label_dict):
     conductor and add label properties.'''
     femm.mi_drawrectangle(*coords)
 
-    label_coord = (average((coords[0], coords[2])),
-                   average((coords[1], coords[3])))
+    label_coord = (np.average((coords[0], coords[2])),
+                   np.average((coords[1], coords[3])))
     femm.mi_addblocklabel(*label_coord)
     femm.mi_selectlabel(*label_coord)
     if in_conductor == 1:
@@ -265,25 +265,36 @@ def add_isolation(tg):
 
 def add_magnetics(tg, label_dict):
     ''' '''
-    # TODO: add function
     for m in tg.magnetics:
+        label_mag = 'mag'
         # draw boxes
         if not m.polarity:  # primary side
-            start_z = label_dict['prim' + str(tg.layers_primary*tg.turns_primary-1)][1] + m.distance + tg.height_copper/2 # take copper into accoutns
-            coords = coords_of_rectangle(m.radius_inner, start_z, m.radius_outer - m.radius_inner, m.thickness)
+            label_mag = label_mag + '_prim'
+            label_turn = 'prim' + str(tg.layers_primary*tg.turns_primary-1)
+            start_z = (label_dict[label_turn][1] + m.distance +
+                       tg.height_copper/2)
+            coords = coords_of_rectangle(m.radius_inner, start_z,
+                                         m.radius_outer - m.radius_inner,
+                                         m.thickness)
         else:   # secondary side
-            start_z = label_dict['sec' + str(tg.layers_secondary*tg.turns_secondary-1)][1] - m.distance - tg.height_copper/2 # take copper into accoutns
-            coords = coords_of_rectangle(m.radius_inner, start_z, m.radius_outer - m.radius_inner, -m.thickness)
+            label_mag = label_mag + '_sec'
+            label_turn = 'sec' + str(tg.layers_secondary*tg.turns_secondary-1)
+            start_z = (label_dict[label_turn][1] - m.distance -
+                       tg.height_copper/2)
+            coords = coords_of_rectangle(m.radius_inner, start_z,
+                                         m.radius_outer - m.radius_inner,
+                                         -m.thickness)
 
         # add label
         femm.mi_drawrectangle(*coords)
-        label_coord = (average((coords[0], coords[2])),
-                       average((coords[1], coords[3])))
+        label_coord = (np.average((coords[0], coords[2])),
+                       np.average((coords[1], coords[3])))
         femm.mi_addblocklabel(*label_coord)
         femm.mi_selectlabel(*label_coord)
         femm.mi_setblockprop(m.material, 1, 0, '<None>', 0, 1, 0)
         femm.mi_clearselected()
-        #add label to label dictionnary
+        # add label to label dictionnary
+        label_dict[label_mag] = coords
 
 
 def add_block_labels(tg, etiquettes_dict):
@@ -363,14 +374,44 @@ def add_block_labels(tg, etiquettes_dict):
     femm.mi_clearselected()
 
 
-def get_peak_field(tg, label_dict):
-    ''' Get peak B field for magnetics. Appears to happen along edge facing the
-    insulation material.'''
-    # TODO implement method
-    # femm.mo_getb(B_r, B_z).
-    # Check each point along a line for the maximum value
-    # Specficy a resoltion for number of points to check.
-    pass
+def get_peak_field(tg, label_dict, dots=100, dots_dpm=None,
+                   dots_distance=None):
+    ''' Get peak B field for magnetics. Check each point along edge facing the
+    insulation material for the maximum value. Specficy a resoltion for number
+    of points to check either by number of dots, dops per mm or distance
+    between each dot.'''
+    # femm.mo_getb(B_r, B_z)
+    # from manual: Get the magnetic flux density associated with the point at
+    # (x,y). The return value is a list with two elements representing Bx and
+    # By for planar problems and Br and Bz for axisymmetric problems.
+
+    maximum_points = []
+    for m in tg.magnetics:
+        b_field_max = -1
+        if not m.polarity:  # primary side
+            label_mag = 'mag_prim'
+        else:  # secondary side
+            label_mag = 'mag_sec'
+        coords_mag = label_dict[label_mag]
+        line_length = coords_mag[2] - coords_mag[0]  # x1 - x0
+
+        if dots_distance:  # distance between each dot
+            pass
+        elif dots_dpm:  # number of dots per mm
+            dots_distance = 1 / dots_dpm
+        else:
+            dots_distance = line_length / dots
+
+        xcoord, ycoord = coords_mag[0:2]
+
+        while xcoord < coords_mag[2]:
+            b_mag = np.linalg.norm(femm.mo_getb(xcoord, ycoord))
+            if b_mag > b_field_max:
+                max_field = b_mag
+            xcoord += dots_distance
+        print(label_mag + ': {:.3e}'.format(max_field))
+        maximum_points.append((label_mag, max_field))
+    return maximum_points
 
 
 def calc_inductance(tg, currents, inductances=(None, None), **kwargs):
@@ -482,6 +523,23 @@ def calc_inductance(tg, currents, inductances=(None, None), **kwargs):
         resistance = 0
         femm.mo_clearblock()
 
+    # mo_showdensityplot(legend,gscale,upper_B,lower_B,type)
+    # From manual: Shows the flux density plot with options:
+    # – legend Set to 0 to hide the plot legend or 1 to show the plot legend.
+    # – gscale Set to 0 for a colour density plot or 1 for a grey scale density
+    #   plot.
+    # – upper_B Sets the upper display limit for the density plot.
+    # – lower_B Sets the lower display limit for the density plot.
+    # – type Type of density plot to display. Valid entries are ’mag’, ’real’,
+    # and ’imag’ for magnitude, real component, and imaginary component of B,
+    # respectively. Alternatively, current density can be displayed by
+    # specifying ’jmag’, ’jreal’, and ’jimag’ for magnitude, real component,
+    # and imaginary component of J, respectively.
+    if 'plot_field_max' in kwargs:
+        femm.mo_refreshview()  # need to refresh before a change can be made
+        femm.mo_showdensityplot(1, 0, kwargs['plot_field_max'] * 20 / 19, 0,
+                                'mag')
+    get_peak_field(tg, etiquettes_dict)
     if kwargs.get('close') is True:
         femm.closefemm()
 
