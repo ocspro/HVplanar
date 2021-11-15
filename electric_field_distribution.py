@@ -72,7 +72,7 @@ def initial_setup(limite_externe, voltage_high, **kwargs):
         for m in kwargs['material']:
             femm.ei_addmaterial(*m)
 
-    # Boundary conditions
+    # Boundary conditions if there is no outer box
     # ei makeABC(n,R,x,y,bc)
     # From manual: creates a series of circular shells that emulate the
     # impedance of an unbounded domain (i.e. an Improvised Asymptotic Boundary
@@ -82,7 +82,8 @@ def initial_setup(limite_externe, voltage_high, **kwargs):
     # be specified as 0 for a Dirichlet outer edge or 1 for a Neumann outer
     # edge. If the function is called without all the parameters, the function
     # makes up reasonable values for the missing parameters.
-    femm.ei_makeABC(7, limite_externe, 0, 0, 0)
+    if 'box' not in kwargs:
+        femm.ei_makeABC(7, limite_externe, 0, 0, 0)
 
 
 def coords_rectangle(x0, y0, dx, dy):
@@ -265,15 +266,25 @@ def add_isolation(tg):
 
 def add_magnetics(tg, label_dict):
     ''' '''
-    # TODO: add function
     for m in tg.magnetics:
+        label_mag = 'mag'
         # draw boxes
         if not m.polarity:  # primary side
-            start_z = label_dict['prim' + str(tg.layers_primary*tg.turns_primary-1)][1] + m.distance # take copper into accoutns
-            coords = coords_rectangle(m.radius_inner, start_z, m.radius_outer - m.radius_inner, m.thickness)
+            label_mag = label_mag + '_prim'
+            label_turn = 'prim' + str(tg.layers_primary*tg.turns_primary-1)
+            start_z = (label_dict[label_turn][1] + m.distance +
+                       tg.height_copper/2)
+            coords = coords_rectangle(m.radius_inner, start_z,
+                                      m.radius_outer - m.radius_inner,
+                                      m.thickness)
         else:   # secondary side
-            start_z = label_dict['sec' + str(tg.layers_secondary*tg.turns_secondary-1)][1] - m.distance # take copper into accoutns
-            coords = coords_rectangle(m.radius_inner, start_z, m.radius_outer - m.radius_inner, -m.thickness)
+            label_mag = label_mag + '_sec'
+            label_turn = 'sec' + str(tg.layers_secondary*tg.turns_secondary-1)
+            start_z = (label_dict[label_turn][1] - m.distance -
+                       tg.height_copper/2)
+            coords = coords_rectangle(m.radius_inner, start_z,
+                                      m.radius_outer - m.radius_inner,
+                                      -m.thickness)
         femm.ei_drawrectangle(*coords)
 
         # add label
@@ -281,7 +292,11 @@ def add_magnetics(tg, label_dict):
                        np.average((coords[1], coords[3])))
         femm.ei_addblocklabel(*label_coord)
         femm.ei_selectlabel(*label_coord)
-        femm.ei_setblockprop(m.material, 1, 0, 'None')
+#        femm.ei_setblockprop('<No Mesh>', 1, 0, 'None')
+        if m.material in ['aluminium', 'copper']:
+            femm.ei_setblockprop('<No Mesh>', 1, 0, 'None')
+        else:
+            femm.ei_setblockprop(m.material, 1, 0, 'None')
         femm.ei_clearselected()
         # TODO add label to label dictionnary
         # set boundary conditions
@@ -321,9 +336,13 @@ def add_block_labels(tg, label_dict):
     label_dict['air'] = coords
 
     # label for the dilectric gel or liquid surrounding the transformer
-    coords = [tg.radius_pcb + 2, tg.height_dielectric + tg.height_gel / 2.]
+    coords = [tg.radius_gel - 0.1, tg.height_gel - 0.1]
     femm.ei_addblocklabel(*coords)
     label_dict['gel'] = coords
+    if tg.radius_gel == tg.radius_dielectric:
+        coords = (coords[0], coords[1] * -1)
+        femm.ei_addblocklabel(*coords)
+        label_dict['gel2'] = coords
 
     # label for the isolation disc
     coords = [2, tg.height_dielectric / 2.]
@@ -348,12 +367,37 @@ def add_block_labels(tg, label_dict):
     femm.ei_clearselected()
 
     femm.ei_selectlabel(*label_dict['gel'])
-    femm.ei_setblockprop('midel', 1, 0, 'None')
+    femm.ei_setblockprop('silgel', 1, 0, 'None')
     femm.ei_clearselected()
+
+    if 'gel2' in label_dict:
+        femm.ei_selectlabel(*label_dict['gel2'])
+        femm.ei_setblockprop('silgel', 1, 0, 'None')
+        femm.ei_clearselected()
 
     femm.ei_selectlabel(*label_dict['insulation'])
     femm.ei_setblockprop(tg.material_dielectric.lower(), 1, 0, 'None')
     femm.ei_clearselected()
+
+
+def _add_outer_box(tg, settings, label_dict):
+    '''
+    Args:
+        settings (): thinkness of box and material protperties
+    '''
+    box_thickness, box_material = settings
+    coords_box = (0, -tg.height_gel, tg.radius_gel,
+                  tg.height_gel + tg.height_dielectric)
+    femm.ei_selectsegment(coords_box[2] / 2, coords_box[1])
+    femm.ei_selectsegment(coords_box[2], coords_box[1] / 2)
+    femm.ei_selectsegment(coords_box[2], tg.height_dielectric / 2)
+    femm.ei_selectsegment(coords_box[2], coords_box[3] / 2)
+    femm.ei_selectsegment(coords_box[2] / 2, coords_box[3])
+    femm.ei_setsegmentprop('<None>', 0, 1, 0, 0, "zero")
+    femm.ei_clearselected()
+
+    femm.ei_selectlabel(*label_dict['air'])
+    femm.ei_deleteselectedlabels()
 
 
 def modify_tracks(tg, label_dict, segment_angle=1, segment_length=0.004):
@@ -925,13 +969,16 @@ def calc_field_distribution(tg, voltage_high=1, view=None, **kwargs):
     add_conductors(tg, etiquettes_dict)
     add_pcbs(tg, etiquettes_dict)
     add_isolation(tg)
-    add_magnetics(tg, etiquettes_dict)
+    if tg.magnetics is not None:
+        add_magnetics(tg, etiquettes_dict)
     add_block_labels(tg, etiquettes_dict)
 
     modify_tracks(tg, etiquettes_dict, segment_angle)
 
     if tg.guard:
         add_guard(tg, tg.guard, etiquettes_dict)
+    if 'box' in kwargs:
+        _add_outer_box(tg, kwargs['box'], etiquettes_dict)
 
     # mi zoomnatural()
     # From manual: zooms to a “natural” view with sensible extents.

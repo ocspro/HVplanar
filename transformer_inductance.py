@@ -91,6 +91,7 @@ def initial_setup(boundary, currents, **kwargs):
     femm.mi_addmaterial('air', 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0)
     femm.mi_addmaterial('fr4', 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0)
     femm.mi_addmaterial('copper', 1, 1, 0, 0, 58, 0, 0, 0, 0, 0, 0)
+    femm.mi_addmaterial('aluminium', 1, 1, 0, 0, 38, 0, 0, 0, 0, 0, 0)
     femm.mi_addmaterial('polysterimide', 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0)
     femm.mi_addmaterial('teflon', 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0)
     femm.mi_addmaterial('silgel', 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0)
@@ -108,7 +109,8 @@ def initial_setup(boundary, currents, **kwargs):
     # be specified as 0 for a Dirichlet outer edge or 1 for a Neumann outer
     # edge. If the function is called without all the parameters, the function
     # makes up reasonable values for the missing parameters.
-    femm.mi_makeABC(7, boundary, 0, 0, 0)
+    if 'box' not in kwargs:
+        femm.mi_makeABC(7, boundary, 0, 0, 0)
 
 
 def coords_of_rectangle(x0, y0, dx, dy):
@@ -284,9 +286,15 @@ def add_magnetics(tg, label_dict):
             coords = coords_of_rectangle(m.radius_inner, start_z,
                                          m.radius_outer - m.radius_inner,
                                          -m.thickness)
-
-        # add label
         femm.mi_drawrectangle(*coords)
+        # round corner
+        if m.thickness < (m.radius_outer-m.radius_inner):
+            corner_radius = 0.05 * m.thickness
+        else:
+            corner_radius = 0.05 * (m.radius_outer-m.radius_inner)
+        if corner_radius > 0.05:
+            corner_radius = 0.05
+        femm.mi_createradius(coords[2], coords[1], corner_radius)
         label_coord = (np.average((coords[0], coords[2])),
                        np.average((coords[1], coords[3])))
         femm.mi_addblocklabel(*label_coord)
@@ -297,7 +305,7 @@ def add_magnetics(tg, label_dict):
         label_dict[label_mag] = coords
 
 
-def add_block_labels(tg, etiquettes_dict):
+def add_block_labels(tg, etiquettes_dict, **kwargs):
     '''Add block labels to pcbs, air, isolation disc, isolation gel/liquid.'''
     # Add block labels
     # ei seteditmode(editmode)
@@ -322,14 +330,19 @@ def add_block_labels(tg, etiquettes_dict):
     etiquettes_dict['pcb_sec'] = coords
 
     # label for the surrounding air
-    coords = [2, tg.height_dielectric * 2 + tg.height_gel]
-    femm.mi_addblocklabel(*coords)
-    etiquettes_dict['air'] = coords
+    if 'box' not in kwargs:
+        coords = [2, min((tg.height_gel*2, 2*tg.radius_dielectric-1))]
+        femm.mi_addblocklabel(*coords)
+        etiquettes_dict['air'] = coords
 
     # label for the dilectric gel or liquid surrounding the transformer
-    coords = [tg.radius_pcb + 2, tg.height_dielectric + tg.height_gel / 2.]
+    coords = [tg.radius_gel - .1, tg.height_gel - 0.1]
     femm.mi_addblocklabel(*coords)
     etiquettes_dict['gel'] = coords
+    if tg.radius_gel == tg.radius_dielectric:
+        coords = (coords[0], coords[1] * -1)
+        femm.mi_addblocklabel(*coords)
+        etiquettes_dict['gel2'] = coords
 
     # label for the isolation disc
     coords = [2, tg.height_dielectric / 2.]
@@ -361,20 +374,80 @@ def add_block_labels(tg, etiquettes_dict):
     femm.mi_setblockprop('fr4', 1, 0, '<None>', 0, 1, 0)
     femm.mi_clearselected()
 
-    femm.mi_selectlabel(*etiquettes_dict['air'])
-    femm.mi_setblockprop('air', 1, 0, '<None>', 0, 1, 0)
-    femm.mi_clearselected()
+    if 'box' not in kwargs:
+        femm.mi_selectlabel(*etiquettes_dict['air'])
+        femm.mi_setblockprop('air', 1, 0, '<None>', 0, 1, 0)
+        femm.mi_clearselected()
 
     femm.mi_selectlabel(*etiquettes_dict['gel'])
     femm.mi_setblockprop('silgel', 1, 0, 'None')
     femm.mi_clearselected()
+
+    if 'gel2' in etiquettes_dict:
+        femm.mi_selectlabel(*etiquettes_dict['gel2'])
+        femm.mi_setblockprop('silgel', 1, 0, 'None')
+        femm.mi_clearselected()
 
     femm.mi_selectlabel(*etiquettes_dict['isolant'])
     femm.mi_setblockprop(tg.material_dielectric, 1, 0, 'None')
     femm.mi_clearselected()
 
 
-def get_peak_field(tg, label_dict, dots=100, dots_dpm=None,
+def _add_outer_box(tg, settings, etiquettes_dict):
+    box_thickness, box_material = settings
+    coords_box = coords_of_rectangle(0,
+                                     -tg.height_gel - box_thickness,
+                                     tg.radius_gel + box_thickness,
+                                     (2*tg.height_gel + tg.height_dielectric +
+                                      2*box_thickness))
+    femm.mi_drawrectangle(*coords_box)
+    coords_box_label = [tg.radius_gel + box_thickness/2, tg.height_gel]
+    femm.mi_addblocklabel(*coords_box_label)
+    etiquettes_dict['box'] = coords_box_label
+
+    femm.mi_selectlabel(*etiquettes_dict['box'])
+    femm.mi_setblockprop(box_material, 1, 0, 'None')
+    femm.mi_clearselected()
+
+    # add boundary conditions to outer side of box
+    femm.mi_selectsegment(tg.radius_gel / 2,
+                          tg.height_gel + tg.height_dielectric + box_thickness)
+    femm.mi_selectsegment(tg.radius_gel / 2,
+                          -tg.height_gel - box_thickness)
+    femm.mi_selectsegment(tg.radius_gel + box_thickness, 0)
+    femm.mi_setsegmentprop('A=0', 0, 1, 0, 0)
+    femm.mi_clearselected()
+
+
+def get_field_magnitude_outline(x, y, dots=2000):
+    ''' Get B feld magnitude along an outline, starting at (0, y) going to
+    (x, y) and (x, 0), with a point resoultion given by the length of the
+    outline and the number of dots.'''
+    field_magnitude = []
+    # square outline
+#    dots_distance = (x + y) / (dots - 1)
+#    x_coord, y_coord = (0, y)
+#    while x_coord <= x:
+#        field_magnitude.append((np.linalg.norm(femm.mo_getb(x_coord, y))))
+#        x_coord += dots_distance
+#    while y_coord > 0:
+#        y_coord -= dots_distance
+#        field_magnitude.append((np.linalg.norm(femm.mo_getb(x, y_coord))))
+
+    # radial outline
+    r, theta = (y, np.pi/2)
+    dots_angle = (np.pi/2) / (dots - 1)
+    x_coord, y_coord = (0, r)
+    while theta >= 0:
+        x_coord = r * np.cos(theta)
+        y_coord = r * np.sin(theta)
+        field_magnitude.append((np.linalg.norm(femm.mo_getb(x_coord,
+                                                            y_coord))))
+        theta -= dots_angle
+    return field_magnitude
+
+
+def get_peak_field(tg, label_dict, dots=1000, dots_dpm=None,
                    dots_distance=None):
     ''' Get peak B field for magnetics. Check each point along edge facing the
     insulation material for the maximum value. Specficy a resoltion for number
@@ -409,7 +482,7 @@ def get_peak_field(tg, label_dict, dots=100, dots_dpm=None,
             if b_mag > b_field_max:
                 max_field = b_mag
             xcoord += dots_distance
-        print(label_mag + ': {:.3e}'.format(max_field))
+#        print(label_mag + ': {:.3e}'.format(max_field))
         maximum_points.append((label_mag, max_field))
     return maximum_points
 
@@ -444,7 +517,9 @@ def calc_inductance(tg, currents, inductances=(None, None), **kwargs):
     add_isolation(tg)
     if tg.magnetics is not None:
         add_magnetics(tg, etiquettes_dict)
-    add_block_labels(tg, etiquettes_dict)
+    add_block_labels(tg, etiquettes_dict, **kwargs)
+    if 'box' in kwargs:     # extepeceted syntax: (thickness in mm, material)
+        _add_outer_box(tg, kwargs['box'], etiquettes_dict)
 
     # mi zoomnatural()
     # From manual: zooms to a “natural” view with sensible extents.
@@ -539,8 +614,20 @@ def calc_inductance(tg, currents, inductances=(None, None), **kwargs):
         femm.mo_refreshview()  # need to refresh before a change can be made
         femm.mo_showdensityplot(1, 0, kwargs['plot_field_max'] * 20 / 19, 0,
                                 'mag')
-    get_peak_field(tg, etiquettes_dict)
+#    if tg.magnetics is not None:
+#        get_peak_field(tg, etiquettes_dict)
+
     if kwargs.get('close') is True:
         femm.closefemm()
 
-    return (inductance, resistance)
+    if 'field_outline' in kwargs:
+        if all(isinstance(el, (list, tuple))
+               for el in kwargs['field_outline']):
+            outline = []
+            for el in kwargs['field_outline']:
+                outline.append(get_field_magnitude_outline(*el))
+        else:
+            outline = get_field_magnitude_outline(*kwargs['field_outline'])
+        return (inductance, resistance, outline)
+    else:
+        return (inductance, resistance)

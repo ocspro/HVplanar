@@ -30,10 +30,9 @@ def _run_FEMM_inductance(geometry, currents, inductances, **kwargs):
         resistance (int): calculated resistance value
     '''
 
-    geometry.check_variables()
-    (inductance, resistance) = tf_ind.calc_inductance(geometry, currents,
-                                                      inductances, **kwargs)
-    return inductance, resistance
+    geometry.check_variables(**kwargs)
+    results = tf_ind.calc_inductance(geometry, currents, inductances, **kwargs)
+    return results
 
 
 def run_FEMM_inductance_prim(geometry, **kwargs):
@@ -48,9 +47,9 @@ def run_FEMM_inductance_prim(geometry, **kwargs):
         R_prim (int): calculated eqv. series resistance of primary side
     '''
 
-    L_prim, R_prim = _run_FEMM_inductance(geometry, currents=[1, 0],
-                                          inductances=[0, 0], **kwargs)
-    return L_prim, R_prim
+    results = _run_FEMM_inductance(geometry, currents=[1, 0],
+                                   inductances=[0, 0], **kwargs)
+    return results
 
 
 def run_FEMM_inductance_sec(geometry, **kwargs):
@@ -65,9 +64,9 @@ def run_FEMM_inductance_sec(geometry, **kwargs):
         R_sec (int): calculated eqv. series resistance of secondary side
     '''
 
-    L_sec, R_sec = _run_FEMM_inductance(geometry, currents=[0, 1],
-                                        inductances=[0, 0], **kwargs)
-    return L_sec, R_sec
+    results = _run_FEMM_inductance(geometry, currents=[0, 1],
+                                   inductances=[0, 0], **kwargs)
+    return results
 
 
 def run_FEMM_inductance_mutual(geometry, **kwargs):
@@ -84,11 +83,15 @@ def run_FEMM_inductance_mutual(geometry, **kwargs):
         R_sec (int): calculated eqv. series resistance of secondary side
         L_mutual (int): calculated  mutual inductance of transformer
     '''
-
-    L_prim, R_prim = run_FEMM_inductance_prim(geometry, **kwargs)
-    L_sec, R_sec = run_FEMM_inductance_sec(geometry, **kwargs)
-    L_mutual, __ = _run_FEMM_inductance(geometry, currents=[1, 1],
-                                        inductances=[L_prim, L_sec], **kwargs)
+    results = run_FEMM_inductance_prim(geometry, **kwargs)
+    L_prim, R_prim = results[0], results[1]
+    if geometry.issymmetric() is True:
+        L_sec, R_sec = L_prim, R_prim
+    else:
+        L_sec, R_sec = run_FEMM_inductance_sec(geometry, **kwargs)
+    results = _run_FEMM_inductance(geometry, currents=[1, 1],
+                                   inductances=[L_prim, L_sec], **kwargs)
+    L_mutual = results[0]
     return [L_prim, R_prim, L_sec, R_sec, L_mutual]
 
 
@@ -104,7 +107,7 @@ def run_FEMM_capacitance(geometry, **kwargs):
         capacitance (int): calculated coupling capacitance of transformer.
     '''
 
-    geometry.check_variables()
+    geometry.check_variables(**kwargs)
     capacitance = tf_field.calc_field_distribution(geometry, **kwargs)
     return capacitance
 
@@ -170,7 +173,7 @@ class TransformerGeometry(object):
         self.magnetics = magnetics
         self.guard = guard
 
-    def check_variables(self):
+    def check_variables(self, **kwargs):
         '''Check and append changes to the class variables to be consistent
         with the expected format of the methods that use this class.'''
         if not isinstance(self.width_between_tracks, (list, tuple)):
@@ -188,6 +191,12 @@ class TransformerGeometry(object):
             self.radius_dielectric = self.radius_pcb + 20
         if self.radius_gel is None:
             self.radius_gel = self.radius_dielectric + 2
+
+        # make sure that geometries made from algorithms are physical
+        if 'optimisation' in kwargs:
+            if self.radius_pcb > self.radius_gel:
+                self.radius_gel = self.radius_pcb + 1.1
+                self.radius_dielectric = self.radius_pcb + 1.1
 
         # add rounding of the four corners closest to the insulation material
         # if no FancyTrack specification is set by the user
@@ -218,6 +227,13 @@ class TransformerGeometry(object):
             t = FancyTrack(c[0], c[1], c[2], side_h, 'towards', True)
             self.tracks.append(t)
         self.tracks.reverse()
+
+    def issymmetric(self):
+        if ((self.turns_primary == self.turns_secondary) and
+            (self.layers_primary == self.layers_secondary)):
+            return True
+        else:
+            return False
 
 
 class FancyTrack(object):
