@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""Module for calculating inducances, resistances and coupling capacitance of
+"""Module for calculating inductances, resistances and coupling capacitance of
 a planar transformer consisting of PCB printed windigns on both sides. Uses the
 program FEMM (www.femm.info) to perform finite element calculations. This
 module is just simplifying the building of the geometry in FEMM.
